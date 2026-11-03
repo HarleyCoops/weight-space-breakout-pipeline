@@ -212,5 +212,18 @@
   },
   "controller_recovery": "Known budget exhaustion was collected as a rejected attempt only after verifying unchanged weights and zero reward. No editor attempts were retried; no budget or promotion rule changed.",
   "feedback_disclosure": "Later rounds received budget and tool-interface guidance based on the failed earlier attempts; no repair edits were supplied.",
-  "validation": "31 development tests passed; all three published HF episodes exactly matched the Prime verifier."
+  "validation": "31 development tests passed; all three published HF episodes exactly matched the Prime verifier.",
+  "final_deployment_check": {
+    "verified": true,
+    "model_revision": "24c97f8321b92612a993c9e49c0c88824d6392b1",
+    "space_revision": "786d7544b1f3410318bfdfee02b6d71bd4b590bc",
+    "policy_hash": "61da8758dbed31e3b6b84661a98348db6e615ff6895aa9b1cf0c05e6fe990f2d",
+    "final_revision_matches_prime": true,
+    "fresh_seeds": [
+      1227661252,
+      2862319071
+    ],
+    "pinned_replay_exact": true,
+    "status_explains_all_rejections": true
+  }
 }
