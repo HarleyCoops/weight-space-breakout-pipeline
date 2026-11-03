@@ -3,9 +3,12 @@
 **New in 0.3.0:** [failure-driven diagnosis and replay](FAILURE_DRIVEN.md). The next
 editor receives a specific failed episode without a supplied diagnosis, can use tools,
 and must propose an explanation plus weight edits. Promotion requires preventing that
-miss under controlled replay and improving broader play. This new protocol has passed
-implementation tests; it has no new LLM trial results yet. The completed run below
-used the earlier protocol and its weights remain unchanged.
+miss under controlled replay and improving broader play. Its first three-attempt trial
+is now complete: all attempts exhausted a budget before submitting valid edits, so
+the faulty weights remained unchanged (final audit **1.3809 → 1.3809**).
+See [the failure-driven results](FAILURE_DRIVEN.md) and
+[its separate demo](https://huggingface.co/spaces/HarleyCooper/weight-space-breakout-failure-driven-demo-01).
+The successful earlier-protocol run described below remains a separate experiment.
 
 A working experiment that starts with known-bad policy weights, asks a hosted LLM for
 an edit, scores the candidate in Prime's environment, publishes accepted weights to
@@ -87,7 +90,7 @@ non-use is verified from each trace. See the protocol disclosure for details.
 and verifier. `pipeline/control.py` implements the resumable bounded loop.
 `pipeline/space_app.py` serves immutable policy revisions. `tests/` covers game rules,
 invalid edits, the acceptance gate, trace tampering, tool-use checks, and interrupted
-state recovery. The original build passed 18 tests; the current suite passes 27, including
+state recovery. The original build passed 18 tests; the current suite passes 31, including
 failure replay, practice-tool execution, and rejecting a targeted rescue that harms
 broader play. All three original real hosted deployment
 comparisons passed. The run used environment **0.2.1**; subsequent documentation or

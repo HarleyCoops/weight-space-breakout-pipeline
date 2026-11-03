@@ -415,6 +415,8 @@ def publish_model(force=False):
     if state.get("final_audit"):
         a = state["final_audit"]
         card += f"## Final audit\n\nOn {a['episodes']} separate seeds, initial faulty return **{a['baseline_return']:.4f}** and final selected return **{a['candidate_return']:.4f}**; paired gain **{a['gain']:+.4f}**, paired standard error **{a['paired_standard_error']:.4f}**. This final audit was not fed to the editor or used to select a policy.\n\n"
+        if last_accepted is None:
+            card += "No edit was promoted in this bounded run. The published weights remain the initial faulty policy; this run does not demonstrate a policy improvement.\n\n"
         if fingerprint(policy) == fingerprint(tracking_policy()):
             card += "The accepted two-weight repair exactly restored the intact handwritten reference controller. The later attempts did not improve it. This demonstrates a working repair-and-deployment loop, not sustained recursive improvement or a new learned skill. The final selected policy cleared no boards in this audit.\n\n"
     card += "## Files\n\n`model.safetensors`, `policy.npz`, and `policy.json` contain the selected policy. `initial_baseline.safetensors` preserves the known-bad start. `manifest.json` links its fingerprint, file checksum, plan, and round decisions. `experiment/` preserves candidates and verifier reports. Every Hub commit is an immutable version; the demo resolves a revision before downloading and checks both hashes.\n\n"

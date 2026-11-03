@@ -6,8 +6,40 @@ propose concrete assignments, and predict the behavioral change they should caus
 Tools and practice simulations are allowed. This is a new protocol; the published
 three-round 0.2.1 experiment has not been rerun or relabelled.
 
-**Validation status:** the implementation and its replay/tool paths have been tested.
-No new tool-assisted LLM trial or new improved checkpoint is claimed in this release.
+**Live trial: November 3, 2026.** The first bounded run completed all three attempts
+on Prime environment **0.3.0**, with `qwen/qwen3.6-35b-a3b` as editor. None returned a
+valid final edit. The selected weights remain the initial faulty reversed-controls
+policy. This run demonstrates recorded rejection and deployment continuity, not an
+improved policy or successful failure repair.
+
+| Attempt | Model calls | Tool calls | Outcome |
+| --- | ---: | ---: | --- |
+| 1 | 8 | 8 | Turn limit reached while exploring; no final JSON |
+| 2 | 1 | 0 | 4,096-token response limit reached during analysis; no final JSON |
+| 3 | 8 | 8 | Turn limit reached while exploring; no final JSON |
+
+The final independent 1,024-game audit returned **1.380859375 before and after**,
+with zero gain and no cleared boards. No candidate reached the 512-game promotion
+test. All three published checkpoints reproduced Prime's selected episode exactly
+on Hugging Face, including the policy hash, actions, reward, and termination.
+
+[Live demo](https://huggingface.co/spaces/HarleyCooper/weight-space-breakout-failure-driven-demo-01) ·
+[Weights and complete attempt audit](https://huggingface.co/HarleyCooper/weight-space-breakout-failure-driven-01) ·
+[Compact result record](results/2026-11-03-failure-driven-01.json)
+
+The original controller halted when it saw a truncated trace, even though Prime's
+verifier had already rejected the attempt. Collection now recognizes these specific
+budget outcomes and records rejection only when the verifier reports no candidate,
+zero reward, and unchanged selected weights. The saved evaluations were collected
+without retrying them. Environment, budgets, seeds, and promotion rules stayed fixed;
+later prompts received budget and tool-usage feedback. Prime and HF login worked.
+
+The editor runtimes initially lacked NumPy; installing it and inspecting helper
+interfaces consumed part of the turn budget. A future separately versioned protocol
+should prepare dependencies before the editor starts, expose a simpler practice
+interface, and reserve a final submission step. These changes were not applied to
+this completed trial. Its result does not establish whether a properly submitted
+repair would have succeeded. The controller and game suite passes 31 tests.
 
 ## Handoff
 

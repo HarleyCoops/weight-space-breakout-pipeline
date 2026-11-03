@@ -61,6 +61,8 @@ def status_text():
     if manifest.get("final_audit"):
         audit = manifest["final_audit"]
         text += f"\n\nFinal independent audit ({audit['episodes']} games): initial faulty policy **{audit['baseline_return']:.3f}**, final selected policy **{audit['candidate_return']:.3f}**. This audit was not used to choose edits."
+        if not any(item["accepted"] for item in manifest["history"]):
+            text += " No edit was promoted in this run; the live weights remain the initial faulty policy."
     return text
 
 
