@@ -76,6 +76,35 @@ class ControllerTests(unittest.TestCase):
         args[0]["info"]["repair_pipeline"]["selected_hash"]="another-policy"
         with self.assertRaises(ValueError): control.validate_trace(*args)
 
+    def token_exhausted_fixture(self):
+        args = self.exhausted_fixture()
+        t,s,_,plan,_,_ = args
+        s["score"]["outcome"] = "agent_completed"
+        s["activity"].update(model_calls=1,tool_calls=0,tool_results=0)
+        t["stop_condition"] = "agent_completed"
+        t["calls"] = t["calls"][:1]
+        t["calls"][0].update(finish_reason="length",usage={"completion_tokens":plan["max_tokens"]})
+        t["nodes"] = [{"message":{"role":"assistant","content":""}}]
+        return args
+
+    def test_expected_token_exhaustion_records_rejection(self):
+        args = self.token_exhausted_fixture()
+        _,selected,report,editor = control.validate_trace(*args)
+        self.assertFalse(report["accepted"])
+        self.assertEqual(fingerprint(selected),fingerprint(args[4]))
+        self.assertEqual(editor["outcome"],"token_limit_without_submission")
+
+    def test_token_exhaustion_cannot_salvage_or_hide_other_errors(self):
+        args = self.token_exhausted_fixture()
+        args[0]["info"]["repair_pipeline"]["valid"] = True
+        with self.assertRaises(ValueError): control.validate_trace(*args)
+        args = self.token_exhausted_fixture()
+        args[0]["calls"][0]["usage"]["completion_tokens"] -= 1
+        with self.assertRaises(ValueError): control.validate_trace(*args)
+        args = self.token_exhausted_fixture()
+        args[1]["execution"]["has_error"] = True
+        with self.assertRaises(ValueError): control.validate_trace(*args)
+
     def failure_fixture(self):
         args=fixture()
         t,s,submission,plan,base,index=args

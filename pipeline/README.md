@@ -51,13 +51,16 @@ evaluation timeout is 60 minutes. Infrastructure failure stops the pipeline for
 inspection rather than silently choosing a different candidate.
 
 A hosted job marked `COMPLETED` can still contain an unsuccessful editor attempt.
-If the editor reaches its declared turn limit without submitting final JSON, the
-controller records `turn_limit_without_submission`, keeps the incumbent, and counts
-that attempt toward the round limit. It passes setup/tool errors to the next round
-as feedback. It never extracts a candidate from unfinished tool-call arguments.
+If the editor reaches its declared turn limit or per-response token limit without
+submitting final JSON, the controller records `turn_limit_without_submission` or
+`token_limit_without_submission`, keeps the incumbent, and counts that attempt
+toward the round limit. This requires the hosted verifier to have rejected the
+attempt with no candidate and zero reward. It passes budget/setup/tool errors to
+the next round as feedback. It never salvages partial JSON or unfinished tool calls.
 Unexpected errors, other truncation reasons, and contradictory verifier reports still
 stop publication. This distinction fixes the first live tool-assisted run's collection
-failure without replaying or discarding its first attempt.
+failures without replaying or discarding attempts. Resuming uses the saved evaluation
+IDs; a new login or a new repository is not needed for these budget outcomes.
 
 ## What happens
 

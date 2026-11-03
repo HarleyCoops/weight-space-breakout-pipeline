@@ -183,17 +183,23 @@ def validate_trace(trace, summary, submission, plan, baseline, index):
                       and summary.get("score",{}).get("outcome") == "max_turns"
                       and trace.get("stop_condition") == "max_turns"
                       and activity["model_calls"] == plan["max_model_calls"])
+    token_limit = bool(failure_driven and summary["execution"].get("is_truncated")
+                       and summary.get("score",{}).get("outcome") == "agent_completed"
+                       and trace.get("stop_condition") == "agent_completed"
+                       and trace.get("calls") and trace["calls"][-1]["finish_reason"] == "length"
+                       and trace["calls"][-1]["usage"]["completion_tokens"] == plan["max_tokens"])
+    exhausted = turn_limit or token_limit
     if failure_driven:
         if not 1 <= activity["model_calls"] <= plan["max_model_calls"] or activity["tool_calls"] > plan["max_tool_calls"]:
             raise ValueError("Tool-assisted editor exceeded its recorded budget")
     elif activity["model_calls"] != 1 or activity["tool_calls"] != 0 or activity["tool_results"] != 0:
         raise ValueError("Protocol requires exactly one model response and no tool use")
-    if summary["execution"]["has_error"] or (summary["execution"]["is_truncated"] and not turn_limit):
+    if summary["execution"]["has_error"] or (summary["execution"]["is_truncated"] and not exhausted):
         raise ValueError("Trace execution failed: " + str(summary.get("score",{}).get("outcome","unknown stop")))
     if len(trace["calls"]) != activity["model_calls"]:
         raise ValueError("Unexpected number of model calls")
     call = trace["calls"][-1]
-    if (call["finish_reason"] != "stop" and not turn_limit) or any(c["model"] != plan["editor"] or c["finish_reason"] not in ("stop","tool_calls") for c in trace["calls"]):
+    if (call["finish_reason"] != "stop" and not exhausted) or any(c["model"] != plan["editor"] or (c["finish_reason"] not in ("stop","tool_calls") and not (token_limit and i == len(trace["calls"])-1 and c["finish_reason"] == "length")) for i,c in enumerate(trace["calls"])):
         raise ValueError("Wrong editor or incomplete generation")
     if any(c["sampling"].get("temperature") != plan["temperature"] or c["sampling"].get("max_tokens") != plan["max_tokens"] for c in trace["calls"]):
         raise ValueError("Sampling settings changed")
@@ -204,7 +210,7 @@ def validate_trace(trace, summary, submission, plan, baseline, index):
         raise ValueError("Unexpected assistant or tool messages")
     response = replies[-1].get("content") or ""
     report = trace["info"]["repair_pipeline"]
-    if turn_limit and (report["valid"] or report["accepted"] or report.get("candidate_hash") or report.get("edits") or report.get("reward") != 0.):
+    if exhausted and (report["valid"] or report["accepted"] or report.get("candidate_hash") or report.get("edits") or report.get("reward") != 0.):
         raise ValueError("Truncated attempts cannot promote or supply a candidate")
     data = trace["task"]["data"]
     if bool(data.get("failure_case_json")) != failure_driven:
@@ -224,8 +230,8 @@ def validate_trace(trace, summary, submission, plan, baseline, index):
         raise ValueError("Unexpected verifier version")
     candidate, valid = baseline, False
     try:
-        if turn_limit:
-            raise ValueError("No final submission before the turn limit")
+        if exhausted:
+            raise ValueError("No final submission before the editor budget limit")
         elif failure_driven:
             payload, explanation = parse_failure_submission(response)
         else:
@@ -266,8 +272,8 @@ def validate_trace(trace, summary, submission, plan, baseline, index):
               "prompt":data["prompt"], "response":response, "call":call, "calls":trace["calls"],
               "activity":activity, "advertised_tools":[t.get("name",t.get("function",{}).get("name")) for t in summary.get("tool_definitions",[])],
               "protocol_note":("Tools and practice simulations permitted under the run's recorded budget; scoring runs outside the editor's writable runtime." if failure_driven else "The hosted harness advertised tools. The prompt prohibited tool use; the trace confirms zero tool calls. Tools were not technically unavailable.")}
-    editor["outcome"] = "turn_limit_without_submission" if turn_limit else ("submitted" if valid else "invalid_submission")
-    if turn_limit:
+    editor["outcome"] = "turn_limit_without_submission" if turn_limit else ("token_limit_without_submission" if token_limit else ("submitted" if valid else "invalid_submission"))
+    if exhausted:
         # Surface actual tool errors to the next attempt, without exporting raw
         # tool logs or changing the environment, seeds, or budget mid-experiment.
         errors = []
@@ -322,11 +328,12 @@ def collect(index):
     else:
         feedback["error"] = report.get("error")
     feedback["outcome"] = editor["outcome"]
-    if editor["outcome"] == "turn_limit_without_submission":
-        feedback.update(error="The previous attempt exhausted its model-turn budget without a final JSON submission; no weight edit was evaluated.",
+    if editor["outcome"] in ("turn_limit_without_submission","token_limit_without_submission"):
+        limit = "model-turn" if editor["outcome"] == "turn_limit_without_submission" else "per-response output-token"
+        feedback.update(error=f"The previous attempt exhausted its {limit} budget without a final JSON submission; no weight edit was evaluated.",
                         model_calls=editor["activity"]["model_calls"],tool_calls=editor["activity"]["tool_calls"],
                         tool_errors=editor.get("tool_errors",[]),
-                        tool_guidance="Reserve the final model turn for diagnosis/expected_prevention/edits JSON. Policy arrays are in policy.weights['W1'], not policy.W1. The snapshot file is a JSON list of nonzero assignments. The helper reads repair_lab.zip directly; no unzip is necessary. Install numpy and run python /tmp/repair_practice.py in one tool call if needed. Submit your best bounded proposal before the turn limit even if practice exploration is incomplete.")
+                        tool_guidance="Reserve the final model turn for diagnosis/expected_prevention/edits JSON. Keep each response concise within 4096 tokens, including any reasoning tokens. Policy arrays are in policy.weights['W1'], not policy.W1. The snapshot file is a JSON list of nonzero assignments. The helper reads repair_lab.zip directly; no unzip is necessary. Install numpy and run python /tmp/repair_practice.py in one tool call if needed. Submit your best bounded proposal before the turn limit even if practice exploration is incomplete.")
     if "failure_case" in report:
         feedback.update(explanation=report.get("explanation"),failure_case_id=report["failure_case"]["case_id"],
                         prevented_recorded_miss=report.get("candidate_replay",{}).get("prevented_recorded_miss",False))
@@ -397,13 +404,13 @@ def publish_model(force=False):
         if "gain" in f:
             rows.append(f"| {item['round']+1} | {f['baseline_return']:.4f} | {f['candidate_return']:.4f} | {f['gain']:+.4f} | {'Accepted' if item['accepted'] else 'Rejected'} |")
         else:
-            reason = "No submission: turn limit" if f.get("outcome") == "turn_limit_without_submission" else "Invalid submission"
+            reason = {"turn_limit_without_submission":"No submission: turn limit", "token_limit_without_submission":"No submission: token limit"}.get(f.get("outcome"),"Invalid submission")
             rows.append(f"| {item['round']+1} | — | {reason} | — | Rejected |")
     card = "---\nlicense: mit\ntags:\n- reinforcement-learning\n- breakout\n- weight-space-programming\n- numpy\n- safetensors\n---\n# Iterative Weight Space Breakout\n\n"
     card += f"**Current weights: {manifest['label']}.** This is a 17,253-parameter game controller, not a language model.\n\n"
     card += f"[Live simulation](https://huggingface.co/spaces/{SPACE_ID}) · [Pipeline source](https://github.com/HarleyCoops/weight-space-breakout-pipeline) · [Prime environment](https://app.primeintellect.ai/dashboard/environments/harleycooper/weight-space-breakout)\n\n"
     card += "The editor and all experiment game evaluations run on Prime. The simulation runs on Hugging Face CPU. A lightweight controller serializes and publishes verified weights. This iterative feedback protocol is separate from the earlier one-shot experiment.\n\n"
-    card += "\n".join(rows) + "\n\nEach row uses 512 fresh matched seeds, so means in different rows are not directly comparable. Rejected candidates remain in the audit; the root checkpoint always contains the incumbent.\n\n"
+    card += "\n".join(rows) + "\n\nEach valid candidate is tested on 512 fresh matched seeds, so means in different rows are not directly comparable. Attempts without a valid submission receive no candidate evaluation. Rejected attempts remain in the audit; the root checkpoint always contains the incumbent.\n\n"
     card += ("This failure-driven run allows tools and up to eight editor calls per round. Acceptance also requires catching the specific recorded miss under a controlled replay.\n\n" if plan.get("protocol_id") == "failure-driven-v1" else "This initial run used one editor response and no tool calls per round.\n\n")
     if state.get("final_audit"):
         a = state["final_audit"]
