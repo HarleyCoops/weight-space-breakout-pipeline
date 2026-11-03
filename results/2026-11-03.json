@@ -1,0 +1,244 @@
+{
+  "completed_rounds": 3,
+  "history": [
+    {
+      "round": 0,
+      "accepted": true,
+      "baseline_hash": "61da8758dbed31e3b6b84661a98348db6e615ff6895aa9b1cf0c05e6fe990f2d",
+      "candidate_hash": "bc358004215825c5de41208d3ce22abcae2ed40a480ce383f3cf8e17a0788a6a",
+      "selected_hash": "bc358004215825c5de41208d3ce22abcae2ed40a480ce383f3cf8e17a0788a6a",
+      "evaluation_id": "f1urlo4jj3kmr2zaarbj7r1o",
+      "trace_id": "0e96051b9cdd4e509f20e7df02838df2",
+      "feedback": {
+        "accepted": true,
+        "valid": true,
+        "edits": {
+          "edits": [
+            {
+              "tensor": "W3",
+              "index": [
+                0,
+                3
+              ],
+              "value": -8.0
+            },
+            {
+              "tensor": "W3",
+              "index": [
+                0,
+                4
+              ],
+              "value": 8.0
+            }
+          ]
+        },
+        "changed_parameters": 2,
+        "baseline_return": 1.451171875,
+        "candidate_return": 2.77734375,
+        "gain": 1.326171875,
+        "paired_standard_error": 0.16578109333089305
+      }
+    },
+    {
+      "round": 1,
+      "accepted": false,
+      "baseline_hash": "bc358004215825c5de41208d3ce22abcae2ed40a480ce383f3cf8e17a0788a6a",
+      "candidate_hash": "de251af100cad8495d8917c411736a50f116311e75ea1687882d8a6ed3b00c0a",
+      "selected_hash": "bc358004215825c5de41208d3ce22abcae2ed40a480ce383f3cf8e17a0788a6a",
+      "evaluation_id": "wiyd660zicrm4iowkcbu6qin",
+      "trace_id": "b10f2aa786df40ae9948f1e77c2179d7",
+      "feedback": {
+        "accepted": false,
+        "valid": true,
+        "edits": {
+          "edits": [
+            {
+              "tensor": "W3",
+              "index": [
+                0,
+                3
+              ],
+              "value": -12.0
+            },
+            {
+              "tensor": "W3",
+              "index": [
+                0,
+                4
+              ],
+              "value": 12.0
+            },
+            {
+              "tensor": "b3",
+              "index": [
+                0
+              ],
+              "value": -5.0
+            },
+            {
+              "tensor": "b3",
+              "index": [
+                1
+              ],
+              "value": -5.0
+            },
+            {
+              "tensor": "b3",
+              "index": [
+                2
+              ],
+              "value": -5.0
+            }
+          ]
+        },
+        "changed_parameters": 5,
+        "baseline_return": 2.853515625,
+        "candidate_return": 2.439453125,
+        "gain": -0.4140625,
+        "paired_standard_error": 0.09216116866646276
+      }
+    },
+    {
+      "round": 2,
+      "accepted": false,
+      "baseline_hash": "bc358004215825c5de41208d3ce22abcae2ed40a480ce383f3cf8e17a0788a6a",
+      "candidate_hash": "f31c85db9214b54f32adf33879571dc6c50f5c827d1264a1af44320c317d015d",
+      "selected_hash": "bc358004215825c5de41208d3ce22abcae2ed40a480ce383f3cf8e17a0788a6a",
+      "evaluation_id": "a3wh7bh3jmmgxsh9a8q3wd0v",
+      "trace_id": "276d907873134042a693cbe0968ac92e",
+      "feedback": {
+        "accepted": false,
+        "valid": true,
+        "edits": {
+          "edits": [
+            {
+              "tensor": "W3",
+              "index": [
+                0,
+                3
+              ],
+              "value": -100.0
+            },
+            {
+              "tensor": "W3",
+              "index": [
+                0,
+                4
+              ],
+              "value": 100.0
+            },
+            {
+              "tensor": "b3",
+              "index": [
+                0
+              ],
+              "value": -100.0
+            },
+            {
+              "tensor": "b3",
+              "index": [
+                1
+              ],
+              "value": -100.0
+            },
+            {
+              "tensor": "b3",
+              "index": [
+                2
+              ],
+              "value": -100.0
+            }
+          ]
+        },
+        "changed_parameters": 5,
+        "baseline_return": 2.853515625,
+        "candidate_return": 2.37890625,
+        "gain": -0.474609375,
+        "paired_standard_error": 0.10285175732412967
+      }
+    }
+  ],
+  "final_audit": {
+    "episodes": 1024,
+    "baseline_return": 1.3017578125,
+    "candidate_return": 2.91796875,
+    "gain": 1.6162109375,
+    "paired_standard_error": 0.110781699478746,
+    "seed_start": 90000,
+    "seed_end": 91023,
+    "candidate_clear_rate": 0.0
+  },
+  "model_revision": "e89571be88f77af06e91444f8463d190d8e8741c",
+  "policy_hash": "bc358004215825c5de41208d3ce22abcae2ed40a480ce383f3cf8e17a0788a6a",
+  "environment": "harleycooper/weight-space-breakout@0.2.1",
+  "model_url": "https://huggingface.co/HarleyCooper/weight-space-breakout-iterative",
+  "space_url": "https://huggingface.co/spaces/HarleyCooper/weight-space-breakout-repair-loop",
+  "deployments": [
+    {
+      "model_id": "HarleyCooper/weight-space-breakout-iterative",
+      "revision": "994b8d57fdfdeec5fbea1fb7eeabe55882bfcd45",
+      "policy_hash": "bc358004215825c5de41208d3ce22abcae2ed40a480ce383f3cf8e17a0788a6a",
+      "policy_label": "Accepted repair from round 1",
+      "seed": 314159,
+      "step": 6,
+      "return": 0.0,
+      "bricks_remaining": 23,
+      "reason": "miss",
+      "actions": [
+        4,
+        3,
+        4,
+        3,
+        3,
+        3
+      ],
+      "verified": true,
+      "checked_at": "2026-11-03T16:08:13.478512+00:00",
+      "comparison": "Exact seed, actions, return, termination, and policy hash match Prime verifier"
+    },
+    {
+      "model_id": "HarleyCooper/weight-space-breakout-iterative",
+      "revision": "a24b25a68b911557473c1964b0c09cd66a36eb4a",
+      "policy_hash": "bc358004215825c5de41208d3ce22abcae2ed40a480ce383f3cf8e17a0788a6a",
+      "policy_label": "Accepted repair from round 1",
+      "seed": 314159,
+      "step": 6,
+      "return": 0.0,
+      "bricks_remaining": 23,
+      "reason": "miss",
+      "actions": [
+        4,
+        3,
+        4,
+        3,
+        3,
+        3
+      ],
+      "verified": true,
+      "checked_at": "2026-11-03T16:09:51.452282+00:00",
+      "comparison": "Exact seed, actions, return, termination, and policy hash match Prime verifier"
+    },
+    {
+      "model_id": "HarleyCooper/weight-space-breakout-iterative",
+      "revision": "8c6d51425a4b982b9071da748d748bc07358c00f",
+      "policy_hash": "bc358004215825c5de41208d3ce22abcae2ed40a480ce383f3cf8e17a0788a6a",
+      "policy_label": "Accepted repair from round 1",
+      "seed": 314159,
+      "step": 6,
+      "return": 0.0,
+      "bricks_remaining": 23,
+      "reason": "miss",
+      "actions": [
+        4,
+        3,
+        4,
+        3,
+        3,
+        3
+      ],
+      "verified": true,
+      "checked_at": "2026-11-03T16:11:33.065605+00:00",
+      "comparison": "Exact seed, actions, return, termination, and policy hash match Prime verifier"
+    }
+  ]
+}

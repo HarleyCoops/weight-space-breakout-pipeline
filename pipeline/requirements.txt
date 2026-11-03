@@ -1,0 +1,5 @@
+numpy==2.4.1
+safetensors==0.8.0
+huggingface-hub==1.27.0
+hf-xet
+gradio-client==2.7.2
