@@ -1,7 +1,8 @@
 # Hosted iterative weight repair
 
-**Current extension:** version 0.3.0 implements [failure-driven repair](FAILURE_DRIVEN.md)
-with unknown-cause diagnosis, practice tools, and a controlled replay check. Fresh
+**Current extension:** version 0.4.0 implements [prepared tool-assisted repair](PREPARED_EDITOR.md)
+with no editor-turn cap and an explicit final submission tool. It extends the
+[failure-driven repair](FAILURE_DRIVEN.md) replay and broad-performance checks. Fresh
 controller plans use that protocol. The description below records the completed
 initial 0.2.1 experiment; its scores and no-tool protocol are unchanged.
 

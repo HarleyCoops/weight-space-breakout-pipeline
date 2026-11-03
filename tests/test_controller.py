@@ -1,5 +1,6 @@
 """Controller boundary checks using a compact synthetic trace, without game execution."""
 import copy
+import hashlib
 import json
 import tempfile
 import unittest
@@ -35,6 +36,37 @@ def fixture():
 
 
 class ControllerTests(unittest.TestCase):
+    def prepared_fixture(self):
+        args=self.failure_fixture()
+        t,s,_,plan,_,_=args
+        plan.update(protocol_id="failure-driven-v2", max_model_calls=None, max_tool_calls=None, max_output_tokens=None)
+        answer=t["nodes"][-1]["message"]["content"]
+        t["nodes"][-1]["message"]={"role":"assistant","tool_calls":[{"name":"repair_submit_edits","arguments":answer}]}
+        t["stop_condition"]="edit_submitted"
+        t["info"]["editor_setup"]={"ready":True}
+        t["info"]["repair_pipeline"].update(protocol="failure-driven-v2",submission={"source":"repair_submit_edits","json":answer,"sha256":hashlib.sha256(answer.encode()).hexdigest()})
+        t["info"]["repair_pipeline"]["gate"].update(seed_start=2060000,seed_end=2060511)
+        t["calls"][0]["sampling"].update(tool_choice="required",parallel_tool_calls=False)
+        t["calls"][0]["finish_reason"]="tool_calls"
+        t["calls"]=[copy.deepcopy(t["calls"][0]) for _ in range(30)]
+        s["activity"].update(model_calls=30,tool_calls=30,tool_results=30)
+        return args
+
+    def test_prepared_editor_has_no_eight_turn_or_tool_limit(self):
+        result=control.validate_trace(*self.prepared_fixture())
+        self.assertEqual(result[3]["outcome"],"submitted")
+
+    def test_prepared_editor_requires_real_committed_final_edit(self):
+        for mutation in ("wrong_tool","no_stop","tampered_commit","not_prepared","tools_optional"):
+            args=self.prepared_fixture()
+            t=args[0]
+            if mutation=="wrong_tool": t["nodes"][-1]["message"]["tool_calls"][0]["name"]="repair_test_edits"
+            if mutation=="no_stop": t["stop_condition"]="agent_completed"
+            if mutation=="tampered_commit": t["info"]["repair_pipeline"]["submission"]["sha256"]="wrong"
+            if mutation=="not_prepared": t["info"]["editor_setup"]["ready"]=False
+            if mutation=="tools_optional": t["calls"][0]["sampling"]["tool_choice"]="auto"
+            with self.subTest(mutation=mutation), self.assertRaises(ValueError): control.validate_trace(*args)
+
     def exhausted_fixture(self):
         args=self.failure_fixture()
         t,s,_,plan,base,_=args

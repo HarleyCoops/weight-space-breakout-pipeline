@@ -60,10 +60,10 @@ def case_digest(case):
     return hashlib.sha256(json.dumps(data,sort_keys=True,separators=(",",":"),allow_nan=False).encode()).hexdigest()
 
 
-def find_failure(policy, round_index, preferred_seed=None):
+def find_failure(policy, round_index, preferred_seed=None, seed_start=1040000):
     """Prefer the just-deployed episode; otherwise inspect at most 32 practice games."""
     seeds = [] if preferred_seed is None else [preferred_seed]
-    seeds += list(range(1040000+32*round_index,1040032+32*round_index))
+    seeds += list(range(seed_start+32*round_index,seed_start+32*round_index+32))
     for seed in dict.fromkeys(seeds):
         case = failure_case(policy,seed)
         if case is not None:
@@ -112,18 +112,21 @@ def replay_failure(policy, case):
             "paddle_center":game.paddle,**game.info()}
 
 
-def verify_failure_round(text, baseline, round_index, case, final_round=False):
+def verify_failure_round(text, baseline, round_index, case, final_round=False, protocol="failure-driven-v1"):
     from . import __version__
     from .policy import apply_edits, SHAPES, faulty_policy
     from .repair_loop import fingerprint, comparison, passes_gate
     if type(round_index) is not int or not 0 <= round_index < 20:
         raise ValueError("Round index must be in 0..19")
+    if protocol not in ("failure-driven-v1", "failure-driven-v2"):
+        raise ValueError("Unknown failure protocol")
+    offset = 1000000 if protocol == "failure-driven-v2" else 0
     if case["policy_hash"] != fingerprint(baseline):
         raise ValueError("Failure belongs to different weights")
     before = replay_failure(baseline,case)
     if before["prevented_recorded_miss"] or before["reason"] != "miss" or not before["same_ball_contact"]:
         raise ValueError("Baseline did not reproduce the recorded miss")
-    report = {"round_index":round_index,"protocol":"failure-driven-v1",
+    report = {"round_index":round_index,"protocol":protocol,
               "baseline_hash":fingerprint(baseline),"valid":False,"accepted":False,"reward":0.,
               "verifier":f"weight-space-breakout@{__version__}","failure_case":case,
               "baseline_replay":before,
@@ -134,7 +137,7 @@ def verify_failure_round(text, baseline, round_index, case, final_round=False):
         candidate = apply_edits(baseline,edits)
         changed = sum(int(np.count_nonzero(candidate.weights[k] != baseline.weights[k])) for k in SHAPES)
         replay = replay_failure(candidate,case)
-        gate = comparison(baseline,candidate,tuple(range(1060000+512*round_index,1060512+512*round_index)))
+        gate = comparison(baseline,candidate,tuple(range(offset+1060000+512*round_index,offset+1060512+512*round_index)))
         accepted = bool(replay["prevented_recorded_miss"] and passes_gate(gate,changed))
         report.update(valid=True,accepted=accepted,reward=float(accepted),edits=edits,
                       explanation=explanation,candidate_hash=fingerprint(candidate),
@@ -145,5 +148,5 @@ def verify_failure_round(text, baseline, round_index, case, final_round=False):
     report["selected_hash"] = fingerprint(selected)
     report["selected_episode"] = rollout(selected,case["seed"],record=True)
     if final_round:
-        report["final_audit"] = comparison(faulty_policy("reversed_controls"),selected,tuple(range(1090000,1091024)))
+        report["final_audit"] = comparison(faulty_policy("reversed_controls"),selected,tuple(range(offset+1090000,offset+1091024)))
     return report

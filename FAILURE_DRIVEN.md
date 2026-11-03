@@ -1,5 +1,8 @@
 # Repairing an observed failure without a known diagnosis
 
+**Current version:** [0.4.0 prepares the tools and removes the editor-turn cap](PREPARED_EDITOR.md).
+The results below remain the historical 0.3.0 trial; they have not been relabelled.
+
 Version 0.3.0 adds `failure-driven-v1`. The input is a failed game and its policy,
 not a label naming the faulty weight. The editor must infer a plausible cause,
 propose concrete assignments, and predict the behavioral change they should cause.

@@ -1,6 +1,10 @@
 # Weight Space Breakout: hosted repair pipeline
 
-**New in 0.3.0:** [failure-driven diagnosis and replay](FAILURE_DRIVEN.md). The next
+**New in 0.4.0:** [prepared practice tools and a final submission action](PREPARED_EDITOR.md),
+with no editor-turn limit. Startup prepares the numerical tools, and the last action
+commits the proposed weight edit for independent verification. Tool calling is enabled.
+
+**Previous 0.3.0 trial:** [failure-driven diagnosis and replay](FAILURE_DRIVEN.md). The next
 editor receives a specific failed episode without a supplied diagnosis, can use tools,
 and must propose an explanation plus weight edits. Promotion requires preventing that
 miss under controlled replay and improving broader play. Its first three-attempt trial
@@ -90,7 +94,7 @@ non-use is verified from each trace. See the protocol disclosure for details.
 and verifier. `pipeline/control.py` implements the resumable bounded loop.
 `pipeline/space_app.py` serves immutable policy revisions. `tests/` covers game rules,
 invalid edits, the acceptance gate, trace tampering, tool-use checks, and interrupted
-state recovery. The original build passed 18 tests; the current suite passes 31, including
+state recovery. The original build passed 18 tests; the current suite passes 35 on Linux, including
 failure replay, practice-tool execution, and rejecting a targeted rescue that harms
 broader play. All three original real hosted deployment
 comparisons passed. The run used environment **0.2.1**; subsequent documentation or

@@ -1,9 +1,9 @@
 [project]
 name = "weight-space-breakout"
-version = "0.3.0"
+version = "0.4.0"
 description = "An independent grid Breakout simulator and weight-repair benchmark"
 requires-python = ">=3.11"
-dependencies = ["numpy>=2.1,<3", "verifiers==0.4.0; sys_platform != 'win32'"]
+dependencies = ["numpy==2.4.1", "verifiers==0.4.0; sys_platform != 'win32'"]
 readme = "README.md"
 license = "MIT"
 
@@ -22,4 +22,4 @@ build-backend = "hatchling.build"
 packages = ["weight_space_breakout"]
 
 [tool.hatch.build.targets.sdist]
-include = ["weight_space_breakout", "tests", "pipeline", "deployment", "README.md", "ONE_SHOT.md", "PIPELINE.md", "FAILURE_DRIVEN.md", "LANGUAGE_EXTENSION.md", "LICENSE", "pyproject.toml"]
+include = ["weight_space_breakout", "tests", "pipeline", "deployment", "README.md", "ONE_SHOT.md", "PIPELINE.md", "FAILURE_DRIVEN.md", "PREPARED_EDITOR.md", "LANGUAGE_EXTENSION.md", "LICENSE", "pyproject.toml"]

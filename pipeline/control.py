@@ -84,10 +84,12 @@ def initialize():
         return read(RUN / "plan.json")
     plan = {"created_at": dt.datetime.now(dt.timezone.utc).isoformat(), "rounds": 3,
             "environment": f"harleycooper/weight-space-breakout@{__version__}",
-            "editor": "qwen/qwen3.6-35b-a3b", "max_tokens": 4096, "temperature": 0,
-            "protocol_id":"failure-driven-v1", "max_model_calls":8,"max_tool_calls":24,"max_output_tokens":16384,
-            "initial_fault": "reversed_controls", "practice_seeds": "1040000..1040031; failure search 1040000+32*r .. 1040031+32*r",
-            "promotion_seeds": "1060000+512*r .. 1060511+512*r", "final_audit_seeds": [1090000, 1091023],
+            "editor": "qwen/qwen3.6-35b-a3b", "max_tokens": 16384, "temperature": 0,
+            "protocol_id":"failure-driven-v2", "max_model_calls":None,"max_tool_calls":None,"max_output_tokens":None,
+            "hosted_timeout_minutes":60, "controller_timeout_seconds":3600,
+            "final_action":"repair_submit_edits", "harness":"null", "tool_choice":"required",
+            "initial_fault": "reversed_controls", "practice_seeds": "2040000..2040031; failure search 2040000+32*r .. 2040031+32*r",
+            "promotion_seeds": "2060000+512*r .. 2060511+512*r", "final_audit_seeds": [2090000, 2091023],
             "promotion_rule": "prevent recorded miss AND changed>0 AND gain>0.10 AND gain-2*paired_SE>0",
             "protocol": "Observe a miss, infer a cause, use tools and practice simulations, submit diagnosis and edits. Freeze history and randomness for targeted replay; also require broad improvement. No gradients. Final audit never used for promotion.",
             "model_repo": MODEL_ID, "space_repo": SPACE_ID}
@@ -123,14 +125,16 @@ def submit(index):
     env_args = {"iterative": True, "policy_snapshot_b64": base64.b64encode(snapshot.encode()).decode(), "policy_sha256": state["current_hash"],
                 "round_index": index, "final_round": index == plan["rounds"]-1,
                 "previous_feedback_b64": base64.b64encode(json.dumps(feedback).encode()).decode()}
-    if plan.get("protocol_id") == "failure-driven-v1":
+    if plan.get("protocol_id") in ("failure-driven-v1","failure-driven-v2"):
         seed = 314159
         if index:
             deployed = read(RUN / f"round-{index-1:02d}" / "deployment-check.json")
             if deployed["policy_hash"] != state["current_hash"]:
                 raise ValueError("Failure handoff belongs to different deployed weights")
             seed = deployed["seed"] if deployed["reason"] == "miss" else -1
-        env_args.update(failure_driven=True,failure_seed=seed,max_editor_turns=plan["max_model_calls"])
+        env_args.update(failure_driven=True,failure_seed=seed)
+        if plan.get("protocol_id") == "failure-driven-v1":
+            env_args["max_editor_turns"] = plan["max_model_calls"]
     save(folder / "environment-args.json", env_args)
     save(folder / "baseline-policy.json", json.loads(snapshot))
     # TOML avoids shell quoting of the nested snapshot and keeps the request reviewable.
@@ -138,12 +142,18 @@ def submit(index):
     config += "\n".join(k + " = " + (str(v).lower() if isinstance(v, bool) else json.dumps(v)) for k, v in env_args.items()) + "\n"
     if plan.get("protocol_id") == "failure-driven-v1":
         config += f'\n[eval.env_args.agent]\nmax_turns = {plan["max_model_calls"]}\nmax_output_tokens = {plan["max_output_tokens"]}\n'
+    elif plan.get("protocol_id") == "failure-driven-v2":
+        config += '\n[eval.env_args.taskset.task]\nprepared_tools = true\n'
+        # v1 AgentConfig defaults to None: omitting these is genuinely unlimited,
+        # rather than a large disguised limit. Runtime service timeouts still apply.
+        config += '\n[eval.env_args.agent.harness]\nid = "null"\n'
+        config += '\n[eval.env_args.agent.sampling]\ntool_choice = "required"\nparallel_tool_calls = false\n'
     config_path = folder / "eval.toml"
     config_path.write_text(config, encoding="utf-8")
     path = str(config_path)
     if os.name == "nt":
         path = "/mnt/" + path[0].lower() + path[2:].replace("\\", "/")
-    output = prime(["eval", "run", path, "--hosted", "--eval-name", f"weight-repair-loop-round-{index+1}", "--timeout-minutes", "60", "--plain"])
+    output = prime(["eval", "run", path, "--hosted", "--eval-name", f"weight-repair-loop-round-{index+1}", "--timeout-minutes", str(plan.get("hosted_timeout_minutes",60)), "--plain"])
     (folder / "submit-output.txt").write_text(output, encoding="utf-8")
     print(output, flush=True)
     matches = re.findall(r"(?:evaluations/|Evaluation ID:\s*|evaluation_id[\"\s:]+)([A-Za-z0-9_-]+)", output)
@@ -171,7 +181,8 @@ def check_comparison(report, count, start):
 
 
 def validate_trace(trace, summary, submission, plan, baseline, index):
-    failure_driven = plan.get("protocol_id") == "failure-driven-v1"
+    failure_driven = plan.get("protocol_id") in ("failure-driven-v1","failure-driven-v2")
+    prepared = plan.get("protocol_id") == "failure-driven-v2"
     if trace["run"]["id"] != submission["evaluation_id"] or summary["environment_id"] != plan["environment"]:
         raise ValueError("Trace belongs to a different run or environment")
     if not trace.get("ok") or not trace.get("is_completed") or trace.get("is_timeout") or trace.get("errors"):
@@ -190,7 +201,7 @@ def validate_trace(trace, summary, submission, plan, baseline, index):
                        and trace["calls"][-1]["usage"]["completion_tokens"] == plan["max_tokens"])
     exhausted = turn_limit or token_limit
     if failure_driven:
-        if not 1 <= activity["model_calls"] <= plan["max_model_calls"] or activity["tool_calls"] > plan["max_tool_calls"]:
+        if activity["model_calls"] < 1 or (plan["max_model_calls"] is not None and activity["model_calls"] > plan["max_model_calls"]) or (plan["max_tool_calls"] is not None and activity["tool_calls"] > plan["max_tool_calls"]):
             raise ValueError("Tool-assisted editor exceeded its recorded budget")
     elif activity["model_calls"] != 1 or activity["tool_calls"] != 0 or activity["tool_results"] != 0:
         raise ValueError("Protocol requires exactly one model response and no tool use")
@@ -199,17 +210,31 @@ def validate_trace(trace, summary, submission, plan, baseline, index):
     if len(trace["calls"]) != activity["model_calls"]:
         raise ValueError("Unexpected number of model calls")
     call = trace["calls"][-1]
-    if (call["finish_reason"] != "stop" and not exhausted) or any(c["model"] != plan["editor"] or (c["finish_reason"] not in ("stop","tool_calls") and not (token_limit and i == len(trace["calls"])-1 and c["finish_reason"] == "length")) for i,c in enumerate(trace["calls"])):
+    if (call["finish_reason"] != ("tool_calls" if prepared else "stop") and not exhausted) or any(c["model"] != plan["editor"] or (c["finish_reason"] not in ("stop","tool_calls") and not (token_limit and i == len(trace["calls"])-1 and c["finish_reason"] == "length")) for i,c in enumerate(trace["calls"])):
         raise ValueError("Wrong editor or incomplete generation")
     if any(c["sampling"].get("temperature") != plan["temperature"] or c["sampling"].get("max_tokens") != plan["max_tokens"] for c in trace["calls"]):
         raise ValueError("Sampling settings changed")
-    if failure_driven and sum(c["usage"]["completion_tokens"] for c in trace["calls"]) > plan["max_output_tokens"]:
+    if failure_driven and plan["max_output_tokens"] is not None and sum(c["usage"]["completion_tokens"] for c in trace["calls"]) > plan["max_output_tokens"]:
         raise ValueError("Editor exceeded total output token budget")
     replies = [n["message"] for n in trace["nodes"] if n["message"]["role"] == "assistant"]
     if not replies or (not failure_driven and (len(replies) != 1 or any(n["message"].get("tool_calls") or n["message"]["role"] == "tool" for n in trace["nodes"]))):
         raise ValueError("Unexpected assistant or tool messages")
     response = replies[-1].get("content") or ""
     report = trace["info"]["repair_pipeline"]
+    if prepared:
+        if trace.get("stop_condition") != "edit_submitted" or not trace["info"].get("editor_setup",{}).get("ready"):
+            raise ValueError("Prepared editor did not finish with its explicit submission tool")
+        final_tools = replies[-1].get("tool_calls") or []
+        if len(final_tools) != 1 or final_tools[0].get("name") != "repair_submit_edits":
+            raise ValueError("Final action must be exactly one repair_submit_edits call")
+        response = final_tools[0]["arguments"]
+        submission_record = report.get("submission",{})
+        if submission_record.get("source") != "repair_submit_edits" or json.loads(response) != json.loads(submission_record["json"]) or hashlib.sha256(submission_record["json"].encode()).hexdigest() != submission_record["sha256"]:
+            raise ValueError("Final edit differs from the tool's committed submission")
+        if report.get("protocol") != "failure-driven-v2":
+            raise ValueError("Wrong prepared-editor verifier protocol")
+        if any(c["sampling"].get("tool_choice") != "required" or c["sampling"].get("parallel_tool_calls") is not False for c in trace["calls"]):
+            raise ValueError("Required sequential tool-calling settings changed")
     if exhausted and (report["valid"] or report["accepted"] or report.get("candidate_hash") or report.get("edits") or report.get("reward") != 0.):
         raise ValueError("Truncated attempts cannot promote or supply a candidate")
     data = trace["task"]["data"]
@@ -246,7 +271,7 @@ def validate_trace(trace, summary, submission, plan, baseline, index):
         if payload != report["edits"] or fingerprint(candidate) != report["candidate_hash"]:
             raise ValueError("Candidate identity mismatch")
         changed = sum(int(np.count_nonzero(candidate.weights[k] != baseline.weights[k])) for k in SHAPES)
-        check_comparison(report["gate"],512,(1060000 if failure_driven else 60000)+512*index)
+        check_comparison(report["gate"],512,(2060000 if prepared else (1060000 if failure_driven else 60000))+512*index)
         accepted = passes_gate(report["gate"],changed)
         if failure_driven:
             replay = report["candidate_replay"]
@@ -265,7 +290,7 @@ def validate_trace(trace, summary, submission, plan, baseline, index):
     if bool(data["final_round"]) != (index == plan["rounds"]-1):
         raise ValueError("Unexpected final-audit scheduling")
     if index == plan["rounds"]-1:
-        check_comparison(report["final_audit"],1024,1090000 if failure_driven else 90000)
+        check_comparison(report["final_audit"],1024,2090000 if prepared else (1090000 if failure_driven else 90000))
     elif "final_audit" in report:
         raise ValueError("Final audit was revealed before the last round")
     editor = {"trace_id":trace["id"], "evaluation_id":submission["evaluation_id"], "model":call["model"],
@@ -273,6 +298,9 @@ def validate_trace(trace, summary, submission, plan, baseline, index):
               "activity":activity, "advertised_tools":[t.get("name",t.get("function",{}).get("name")) for t in summary.get("tool_definitions",[])],
               "protocol_note":("Tools and practice simulations permitted under the run's recorded budget; scoring runs outside the editor's writable runtime." if failure_driven else "The hosted harness advertised tools. The prompt prohibited tool use; the trace confirms zero tool calls. Tools were not technically unavailable.")}
     editor["outcome"] = "turn_limit_without_submission" if turn_limit else ("token_limit_without_submission" if token_limit else ("submitted" if valid else "invalid_submission"))
+    if prepared:
+        editor["setup"] = trace["info"]["editor_setup"]
+        editor["submission_receipt"] = report["submission"]
     if exhausted:
         # Surface actual tool errors to the next attempt, without exporting raw
         # tool logs or changing the environment, seeds, or budget mid-experiment.
@@ -388,6 +416,8 @@ def publish_model(force=False):
                                    "environment":plan["environment"],"policy_hash":fingerprint(policy)})
     shutil.copy2(ROOT / "deployment/inference.py", folder / "inference.py")
     shutil.copy2(ROOT / "LICENSE", folder / "LICENSE")
+    for name in ("PREPARED_EDITOR.md","FAILURE_DRIVEN.md","LANGUAGE_EXTENSION.md"):
+        shutil.copy2(ROOT / name, folder / name)
     audit = folder / "experiment"
     audit.mkdir(exist_ok=True)
     shutil.copy2(RUN / "plan.json", audit / "plan.json")
@@ -411,7 +441,10 @@ def publish_model(force=False):
     card += f"[Live simulation](https://huggingface.co/spaces/{SPACE_ID}) · [Pipeline source](https://github.com/HarleyCoops/weight-space-breakout-pipeline) · [Prime environment](https://app.primeintellect.ai/dashboard/environments/harleycooper/weight-space-breakout)\n\n"
     card += "The editor and all experiment game evaluations run on Prime. The simulation runs on Hugging Face CPU. A lightweight controller serializes and publishes verified weights. This iterative feedback protocol is separate from the earlier one-shot experiment.\n\n"
     card += "\n".join(rows) + "\n\nEach valid candidate is tested on 512 fresh matched seeds, so means in different rows are not directly comparable. Attempts without a valid submission receive no candidate evaluation. Rejected attempts remain in the audit; the root checkpoint always contains the incumbent.\n\n"
-    card += ("This failure-driven run allows tools and up to eight editor calls per round. Acceptance also requires catching the specific recorded miss under a controlled replay.\n\n" if plan.get("protocol_id") == "failure-driven-v1" else "This initial run used one editor response and no tool calls per round.\n\n")
+    if plan.get("protocol_id") == "failure-driven-v2":
+        card += "This run uses prepared inspection and practice tools with no model-turn, tool-call, or total-output-token limit. Its final action is the explicit submit_edits tool. Each response has a 16,384-token allowance and hosted jobs retain a 60-minute service timeout. Acceptance requires both catching the recorded miss and broader improvement.\n\n"
+    else:
+        card += ("This failure-driven run allows tools and up to eight editor calls per round. Acceptance also requires catching the specific recorded miss under a controlled replay.\n\n" if plan.get("protocol_id") == "failure-driven-v1" else "This initial run used one editor response and no tool calls per round.\n\n")
     if state.get("final_audit"):
         a = state["final_audit"]
         card += f"## Final audit\n\nOn {a['episodes']} separate seeds, initial faulty return **{a['baseline_return']:.4f}** and final selected return **{a['candidate_return']:.4f}**; paired gain **{a['gain']:+.4f}**, paired standard error **{a['paired_standard_error']:.4f}**. This final audit was not fed to the editor or used to select a policy.\n\n"
@@ -470,7 +503,7 @@ def run_loop():
     for index in range(plan["rounds"]):
         submission = submit(index)
         if index >= read(RUN / "state.json")["completed_rounds"]:
-            deadline = time.monotonic()+900
+            deadline = time.monotonic()+plan.get("controller_timeout_seconds",900)
             while True:
                 status = json_output(prime(["eval","get",submission["evaluation_id"],"--output","json","--plain"]))
                 print(f"Round {index+1}: {status['status']}",flush=True)
@@ -480,7 +513,7 @@ def run_loop():
                     raise RuntimeError("Hosted evaluation stopped; inspect saved ID before any retry")
                 if time.monotonic() > deadline:
                     prime(["eval","stop",submission["evaluation_id"],"--plain"])
-                    raise TimeoutError("Stopped evaluation after controller's 15-minute limit")
+                    raise TimeoutError("Stopped evaluation after its recorded service timeout")
                 time.sleep(15)
             collect(index)
         if index == read(RUN / "state.json")["completed_rounds"]-1:
@@ -505,6 +538,8 @@ def publish_space():
     folder.mkdir(exist_ok=True)
     for source, target in [("pipeline/space_app.py","app.py"),("weight_space_breakout/game.py","game.py"),("deployment/inference.py","inference.py"),("LICENSE","LICENSE")]:
         shutil.copy2(ROOT / source, folder / target)
+    for name in ("PREPARED_EDITOR.md","FAILURE_DRIVEN.md","LANGUAGE_EXTENSION.md"):
+        shutil.copy2(ROOT / name, folder / name)
     app = folder / "app.py"
     app.write_text(app.read_text(encoding="utf-8").replace('MODEL_ID = "HarleyCooper/weight-space-breakout-iterative"', 'MODEL_ID = '+json.dumps(MODEL_ID)), encoding="utf-8")
     (folder / "requirements.txt").write_text("numpy==2.4.1\nsafetensors==0.8.0\nhuggingface_hub==1.27.0\npillow==11.3.0\n")

@@ -2,7 +2,50 @@
 import inspect
 import io
 import zipfile
+import json
+import numpy as np
 from . import game, policy, evaluation, failures
+
+
+class PracticeSession:
+    """Ready-to-use measurements, with only practice seeds exposed to the editor."""
+
+    def __init__(self, snapshot, case):
+        from .repair_loop import from_sparse, fingerprint
+        self.base = from_sparse(snapshot)
+        self.case = json.loads(case) if isinstance(case, str) else case
+        if self.case["policy_hash"] != fingerprint(self.base):
+            raise ValueError("Practice case belongs to a different policy")
+        self.seeds = tuple(range(2040000, 2040032))
+        self.before = [evaluation.rollout(self.base, s)["return"] for s in self.seeds]
+        self.baseline_replay = failures.replay_failure(self.base, self.case)
+        if self.baseline_replay["prevented_recorded_miss"] or not self.baseline_replay["same_ball_contact"]:
+            raise ValueError("Practice setup did not reproduce the miss")
+
+    def inspect(self, tensor=""):
+        if tensor and tensor not in policy.SHAPES:
+            raise ValueError("Unknown tensor; choose W1, b1, W2, b2, W3, or b3")
+        return {"ready": True, "shapes": policy.SHAPES,
+                "nonzero_weights": [e for e in self.base.sparse() if not tensor or e["tensor"] == tensor],
+                "practice_games": len(self.seeds), "baseline_mean": float(np.mean(self.before)),
+                "baseline_replay": self.baseline_replay,
+                "usage": "Call test_edits with scalar assignments, then submit_edits as your final action. No installation or file access is needed."}
+
+    def test(self, edits):
+        candidate = policy.apply_edits(self.base, {"edits": edits})
+        after = [evaluation.rollout(candidate, s)["return"] for s in self.seeds]
+        return {"practice_only": True, "target_replay": failures.replay_failure(candidate, self.case),
+                "practice_games": len(self.seeds), "baseline_mean": float(np.mean(self.before)),
+                "candidate_mean": float(np.mean(after)), "practice_gain": float(np.mean(np.asarray(after)-self.before)),
+                "next_step": "Revise if needed; when ready, call submit_edits with your diagnosis, expected_prevention, and final assignments."}
+
+    def submission(self, diagnosis, expected_prevention, edits):
+        text = json.dumps(dict(diagnosis=diagnosis, expected_prevention=expected_prevention, edits=edits), allow_nan=False)
+        payload, _ = failures.parse_failure_submission(text)
+        candidate = policy.apply_edits(self.base, payload)
+        if not any(np.any(candidate.weights[k] != self.base.weights[k]) for k in policy.SHAPES):
+            raise ValueError("Submit at least one actual weight change")
+        return text
 
 
 def practice_bundle():

@@ -5,11 +5,12 @@ Prime-hosted Qwen and Prime-hosted games, then publishes to Hugging Face CPU Bas
 The process running the controller needs no GPU. It does need network access,
 authenticated Prime CLI, and Hugging Face repository write permission.
 
-Fresh plans use `failure-driven-v1` from environment 0.3.0. The editor diagnoses an
-observed failure and can use tools and practice simulations for up to eight model
-turns per round. Acceptance requires both preventing that miss and broader improvement.
-See [the exact protocol and validation status](../FAILURE_DRIVEN.md). Previously saved
-plans retain their original single-response/no-tool behavior.
+Fresh plans use `failure-driven-v2` from environment 0.4.0. The editor diagnoses an
+observed failure with prepared inspection and practice tools. There is no model-turn,
+tool-call, or total-output-token limit; its final action explicitly submits the edit.
+Acceptance requires both preventing that miss and broader improvement.
+See [the exact protocol and validation status](../PREPARED_EDITOR.md). Previously saved
+plans retain their original settings.
 
 ## Setup
 
@@ -44,13 +45,15 @@ uv run --no-project --with-requirements pipeline/requirements.txt python pipelin
 HF repository IDs and run directory must remain unchanged when resuming. The source
 Space's links to the original experiment and source repository remain as attribution.
 Compute and token charges apply on Prime. There is no automatic periodic schedule.
-The default frozen plan allows three rounds, with up to eight model calls and 16,384
-output tokens per round in the new protocol;
-it stops a still-running evaluation after a 15-minute wait. The platform's own
-evaluation timeout is 60 minutes. Infrastructure failure stops the pipeline for
+The default frozen plan uses three repair rounds for validation and a final audit.
+Within a round, editor turns and aggregate tokens are unlimited. Each response allows
+16,384 output tokens; the platform and controller have a 60-minute job timeout.
+Infrastructure failure stops the pipeline for
 inspection rather than silently choosing a different candidate.
 
 A hosted job marked `COMPLETED` can still contain an unsuccessful editor attempt.
+The prepared-tools protocol requires a verified final `repair_submit_edits` call.
+When collecting historical eight-turn protocol runs, the following recovery applies:
 If the editor reaches its declared turn limit or per-response token limit without
 submitting final JSON, the controller records `turn_limit_without_submission` or
 `token_limit_without_submission`, keeps the incumbent, and counts that attempt
