@@ -5,7 +5,7 @@ Prime-hosted Qwen and Prime-hosted games, then publishes to Hugging Face CPU Bas
 The process running the controller needs no GPU. It does need network access,
 authenticated Prime CLI, and Hugging Face repository write permission.
 
-Fresh plans use `failure-driven-v2` from environment 0.4.1. The editor diagnoses an
+Fresh plans use `failure-driven-v2` from environment 0.4.2. The editor diagnoses an
 observed failure with prepared inspection and practice tools. There is no model-turn,
 tool-call, or total-output-token limit; its final action explicitly submits the edit.
 Acceptance requires both preventing that miss and broader improvement.
@@ -48,8 +48,13 @@ Compute and token charges apply on Prime. There is no automatic periodic schedul
 The default frozen plan uses three repair rounds for validation and a final audit.
 Within a round, editor turns and aggregate tokens are unlimited. Each response allows
 16,384 output tokens; the platform and controller have a 60-minute job timeout.
-Infrastructure failure stops the pipeline for
-inspection rather than silently choosing a different candidate.
+Infrastructure failure stops the pipeline for inspection. When Prime has committed
+the trace, the controller saves the raw trace, logs, and a compact failure report,
+then publishes the failure audit with unchanged policy weights. It does not advance
+the repair round or silently choose a practice candidate. If a trace is not yet
+available, resume the same controller later to archive it; the saved evaluation ID
+prevents a duplicate submission. Starting a revised experiment requires a new run
+directory and new repositories so the failed attempt remains intact.
 
 A hosted job marked `COMPLETED` can still contain an unsuccessful editor attempt.
 The prepared-tools protocol requires a verified final `repair_submit_edits` call.

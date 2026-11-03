@@ -1,6 +1,6 @@
 # Prepared tools and an explicit final weight edit
 
-Environment 0.4.1 provides `failure-driven-v2`. Tool calling is enabled. The editor
+Environment 0.4.2 provides `failure-driven-v2`. Tool calling is enabled. The editor
 has **no model-turn limit, tool-call limit, or aggregate output-token limit**. The
 earlier no-tool proof of concept and the unsuccessful eight-turn trial retain their
 original records and checkpoints.
@@ -55,13 +55,49 @@ Practice seeds: `2040000..2040031`; fallback failure search:
 
 ## Validation
 
-All 37 tests pass on Linux, including real-server startup, preparation, practice execution,
+All 39 tests pass on Linux, including real-server startup, preparation, practice execution,
 explicit submission, rejection after submission, and controller validation of a
 30-call trace. A scripted local provider also drives the real agent harness through
 inspection, practice, and submission: the session stops with `edit_submitted`, makes
 no fourth model call, and runs the verifier. This is an integration test using a known
-fixture, not an LLM repair result. A hosted trial is required to verify the complete Prime-to-HF path;
-its results will be recorded here after completion.
+fixture, not an LLM repair result. Tests also cover invalid/repeated patch feedback,
+the advertised 64-item tool schema, and archiving an execution failure without
+advancing the round or promoting a practice candidate.
+
+## Hosted 0.4.1 trial: November 3, 2026
+
+The prepared tools worked in the hosted environment. Qwen made 123 model turns:
+one inspection call and 122 practice-test calls. There were 21 valid practice
+results, 100 input errors (99 oversized patches and one invalid index), and one
+test call without a recorded result. The same 69-assignment patch was requested
+100 times. There was no final `repair_submit_edits` call.
+
+None of the valid practice tests prevented the recorded miss. The best practice
+mean was 1.65625 against a 1.5 baseline on the 32 practice seeds; these are search
+results, not an independent performance estimate. No 512-game promotion test or
+final audit ran. A provider connection closed with an incomplete response (HTTP
+502), ending the attempt after approximately 46 minutes of rollout time. This was
+not a login error, turn-limit stop, or the declared 60-minute timeout.
+
+The controller halted. No weights were promoted, and rounds two and three were
+not launched. The initial faulty policy remains published. The raw trace is saved
+locally under `artifacts/failure-driven-run-02/round-00/trace.json`; a compact public
+failure audit accompanies the model. A failed execution is not relabelled as a
+scored rejection or silently retried.
+
+- [Prime evaluation](https://app.primeintellect.ai/dashboard/evaluations/a4hrpun4gvsa9kwnjekri7od)
+- [Model and failure audit](https://huggingface.co/HarleyCooper/weight-space-breakout-failure-driven-02)
+- [Live simulation of the unchanged policy](https://huggingface.co/spaces/HarleyCooper/weight-space-breakout-failure-driven-demo-02)
+
+Version 0.4.2 makes the assignment limit and valid scalar types explicit in the tool
+schema, gives tensor-specific index errors, identifies repeated practice patches,
+and retains the best practice patch for inspection. Its prompt explains that a
+patch omits unchanged weights and that splitting a patch across calls does not
+accumulate changes. No turn cap or golden repair was added. The service connection
+failure is separate; these changes address the observed unproductive tool loop,
+not the upstream network. The controller now archives failed traces and publishes
+the failure status with the unchanged weights. A new hosted trial is needed to
+measure whether these feedback changes improve Qwen's behavior.
 
 The first 0.4.0 hosted startup was cancelled during tool-server setup: its Python
 module lacked the executable entry point. No editor trace was produced. Version

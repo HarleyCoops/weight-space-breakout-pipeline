@@ -1,8 +1,14 @@
 # Weight Space Breakout: hosted repair pipeline
 
-**New in 0.4.1:** [prepared practice tools and a final submission action](PREPARED_EDITOR.md),
+**New in 0.4.2:** [prepared practice tools and a final submission action](PREPARED_EDITOR.md),
 with no editor-turn limit. Startup prepares the numerical tools, and the last action
 commits the proposed weight edit for independent verification. Tool calling is enabled.
+
+The 0.4.1 hosted attempt made 123 model turns but never submitted an edit. It
+repeated an oversized patch and eventually ended with a provider connection error.
+No weights were promoted. Version 0.4.2 improves tool constraints and repeated-patch
+feedback and preserves failed-attempt audits; its effect on editor behavior still
+requires a new hosted trial. See [the full recorded outcome](PREPARED_EDITOR.md).
 
 **Previous 0.3.0 trial:** [failure-driven diagnosis and replay](FAILURE_DRIVEN.md). The next
 editor receives a specific failed episode without a supplied diagnosis, can use tools,
@@ -94,7 +100,7 @@ non-use is verified from each trace. See the protocol disclosure for details.
 and verifier. `pipeline/control.py` implements the resumable bounded loop.
 `pipeline/space_app.py` serves immutable policy revisions. `tests/` covers game rules,
 invalid edits, the acceptance gate, trace tampering, tool-use checks, and interrupted
-state recovery. The original build passed 18 tests; the current suite passes 37 on Linux, including
+state recovery. The original build passed 18 tests; the current suite passes 39 on Linux, including
 the complete agent/tool/submission lifecycle with a scripted provider, failure replay,
 practice-tool execution, and rejecting a targeted rescue that harms
 broader play. All three original real hosted deployment

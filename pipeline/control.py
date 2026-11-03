@@ -23,6 +23,7 @@ from weight_space_breakout import __version__
 from weight_space_breakout.policy import faulty_policy, tracking_policy, apply_edits, parse_submission, SHAPES
 from weight_space_breakout.repair_loop import fingerprint, from_sparse, passes_gate
 from weight_space_breakout.failures import parse_failure_submission, case_digest
+from pipeline.failure_audit import summarize_failure
 
 RUN = Path(os.environ.get("REPAIR_RUN_DIR", ROOT / "artifacts/iterative-repair"))
 MODEL_ID = os.environ.get("REPAIR_MODEL_ID", "HarleyCooper/weight-space-breakout-iterative")
@@ -379,6 +380,29 @@ def collect(index):
     return item
 
 
+def archive_failure(index, status):
+    """Preserve a failed service attempt without advancing the repair history."""
+    folder = RUN / f"round-{index:02d}"
+    save(folder / "hosted-status.json", status)
+    summaries = json_output(prime(["traces","list","--run-id",status["evaluation_id"],"--output","json","--plain"]))
+    save(folder / "trace-list.json", summaries)
+    if len(summaries.get("items", [])) != 1:
+        raise RuntimeError("Failure status saved; full trace is not available yet. Resume later to archive it.")
+    summary = summaries["items"][0]
+    trace = json_output(prime(["traces","get",summary["trace_id"],"--raw","--output","json","--plain"]))
+    save(folder / "trace-summary.json", summary)
+    save(folder / "trace.json", trace)
+    (folder / "hosted-log.txt").write_text(prime(["eval","logs",status["evaluation_id"],"--tail","200","--plain"]),encoding="utf-8")
+    report = summarize_failure(trace,summary,status,index)
+    save(folder / "execution-failure.json", report)
+    state = read(RUN / "state.json")
+    failures = state.setdefault("execution_failures", [])
+    failures[:] = [f for f in failures if f["evaluation_id"] != status["evaluation_id"]]
+    failures.append(report)
+    save(RUN / "state.json",state)
+    return report
+
+
 def publish_model(force=False):
     from huggingface_hub import HfApi, hf_hub_download
     from safetensors.numpy import save_file
@@ -413,6 +437,8 @@ def publish_model(force=False):
                 "final_audit": state.get("final_audit"), "run_plan": plan}
     if state.get("setup_failures"):
         manifest["setup_failures"] = state["setup_failures"]
+    if state.get("execution_failures"):
+        manifest["execution_failures"] = state["execution_failures"]
     save(folder / "manifest.json", manifest)
     save(folder / "config.json", {"architecture":"tanh_mlp","dimensions":[500,32,32,5],"parameters":17253,
                                    "environment":plan["environment"],"policy_hash":fingerprint(policy)})
@@ -423,6 +449,8 @@ def publish_model(force=False):
     audit = folder / "experiment"
     audit.mkdir(exist_ok=True)
     shutil.copy2(RUN / "plan.json", audit / "plan.json")
+    for failure in state.get("execution_failures", []):
+        save(audit / "failed-attempts" / (failure["evaluation_id"]+".json"),failure)
     for index in range(state["completed_rounds"]):
         source = RUN / f"round-{index:02d}"
         target = audit / f"round-{index:02d}"
@@ -441,6 +469,8 @@ def publish_model(force=False):
     card = "---\nlicense: mit\ntags:\n- reinforcement-learning\n- breakout\n- weight-space-programming\n- numpy\n- safetensors\n---\n# Iterative Weight Space Breakout\n\n"
     card += f"**Current weights: {manifest['label']}.** This is a 17,253-parameter game controller, not a language model.\n\n"
     card += f"[Live simulation](https://huggingface.co/spaces/{SPACE_ID}) · [Pipeline source](https://github.com/HarleyCoops/weight-space-breakout-pipeline) · [Prime environment](https://app.primeintellect.ai/dashboard/environments/harleycooper/weight-space-breakout)\n\n"
+    for failure in state.get("execution_failures", []):
+        card += f"**Hosted attempt stopped: {failure['outcome']}.** It recorded {failure.get('activity',{}).get('model_turns',0)} model turns, {failure['valid_practice_results']} valid practice results, and {failure['final_submission_calls']} final submission calls. No weights were promoted from this failed attempt. Practice results are not held-out evaluation results. [Evaluation](https://app.primeintellect.ai/dashboard/evaluations/{failure['evaluation_id']}) · [Failure audit](experiment/failed-attempts/{failure['evaluation_id']}.json).\n\n"
     card += "The editor and all experiment game evaluations run on Prime. The simulation runs on Hugging Face CPU. A lightweight controller serializes and publishes verified weights. This iterative feedback protocol is separate from the earlier one-shot experiment.\n\n"
     card += "\n".join(rows) + "\n\nEach valid candidate is tested on 512 fresh matched seeds, so means in different rows are not directly comparable. Attempts without a valid submission receive no candidate evaluation. Rejected attempts remain in the audit; the root checkpoint always contains the incumbent.\n\n"
     if plan.get("protocol_id") == "failure-driven-v2":
@@ -512,6 +542,8 @@ def run_loop():
                 if status["status"] == "COMPLETED":
                     break
                 if status["status"] in ("FAILED","CANCELLED","STOPPED","ERROR"):
+                    archive_failure(index,status)
+                    publish_model(force=True)
                     raise RuntimeError("Hosted evaluation stopped; inspect saved ID before any retry")
                 if time.monotonic() > deadline:
                     prime(["eval","stop",submission["evaluation_id"],"--plain"])

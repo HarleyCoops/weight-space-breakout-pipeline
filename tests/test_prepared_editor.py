@@ -16,6 +16,25 @@ from weight_space_breakout.practice_tools import PracticeSession
 
 
 class PracticeTests(unittest.TestCase):
+    def test_invalid_and_repeated_patch_feedback(self):
+        base=faulty_policy("reversed_controls")
+        lab=PracticeSession(json.dumps(base.sparse()),failure_case(base,314159))
+        invalid=[{"tensor":"W3","index":[32,0],"value":1.0}]
+        first=lab.test(invalid)
+        self.assertFalse(first["valid"])
+        self.assertIn("W3",first["error"])
+        self.assertIn("shape",first["error"])
+        self.assertTrue(lab.test(invalid)["repeated_patch"])
+        oversize=[{"tensor":"W1","index":[i,0],"value":1.0} for i in range(69)]
+        self.assertIn("69",lab.test(oversize)["error"])
+        edits=repair_edits("reversed_controls")["edits"]
+        first=lab.test(edits); repeated=lab.test(edits)
+        self.assertFalse(first["repeated_patch"])
+        self.assertTrue(repeated["repeated_patch"])
+        self.assertEqual(first["candidate_mean"],repeated["candidate_mean"])
+        self.assertEqual(lab.inspect()["best_practice_patch"]["edits"],edits)
+        self.assertNotIn("accepted",repeated)
+
     def test_ready_practice_and_explicit_submission(self):
         base=faulty_policy("reversed_controls")
         lab=PracticeSession(json.dumps(base.sparse()),failure_case(base,314159))
@@ -136,6 +155,15 @@ class PreparedAdapterTests(unittest.IsolatedAsyncioTestCase):
                                 await asyncio.sleep(.1)
                         names={t["name"] for t in reply.json()["result"]["tools"]}
                         self.assertEqual(names,{"inspect_policy","test_edits","submit_edits"})
+                        for definition in reply.json()["result"]["tools"]:
+                            if definition["name"] in ("test_edits","submit_edits"):
+                                self.assertEqual(definition["inputSchema"]["properties"]["edits"]["maxItems"],64)
+                        invalid=[{"tensor":"W1","index":[i,0],"value":1.0} for i in range(69)]
+                        response=await client.post(f"http://127.0.0.1:{port_file.read_text()}/mcp",headers={"Accept":"application/json, text/event-stream"},json={"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"test_edits","arguments":{"edits":invalid}}})
+                        result=response.json()["result"]
+                        self.assertTrue(result["isError"],result)
+                        self.assertIn("64",json.dumps(result))
+                        self.assertFalse(state["submission_json"])
                         edits=repair_edits("reversed_controls")["edits"]
                         for tool,args in (("inspect_policy",{"tensor":"W3"}),
                                           ("test_edits",{"edits":edits}),

@@ -1,0 +1,43 @@
+{
+  "round": 0,
+  "evaluation_id": "a4hrpun4gvsa9kwnjekri7od",
+  "trace_id": "bd1ebaa61f264ab0a4e330b9ae48f8de",
+  "status": "FAILED",
+  "environment": "harleycooper/weight-space-breakout@0.4.1",
+  "outcome": "provider_error",
+  "errors": [
+    {
+      "type": "ProviderError",
+      "message": "peer closed connection without sending complete message body (incomplete chunked read)",
+      "status_code": 502
+    }
+  ],
+  "activity": {
+    "total_entries": 246,
+    "user_messages": 1,
+    "model_turns": 123,
+    "model_calls": 125,
+    "tool_calls": 123,
+    "tool_results": 122,
+    "steps_per_branch": [
+      246
+    ]
+  },
+  "tool_counts": {
+    "repair_inspect_policy": 1,
+    "repair_test_edits": 122
+  },
+  "valid_practice_results": 21,
+  "practice_input_errors": {
+    "Error executing tool test_edits: Out-of-bounds index": 1,
+    "Error executing tool test_edits: At most 64 scalar edits": 99
+  },
+  "target_preventions_in_practice": 0,
+  "best_practice_mean": 1.65625,
+  "unique_practice_requests": 23,
+  "largest_identical_request_count": 100,
+  "final_submission_calls": 0,
+  "independent_verifier_completed": false,
+  "promoted": false,
+  "note": "Execution failure: no promotion. Practice results are diagnostic only and are not held-out evaluation results."
+}

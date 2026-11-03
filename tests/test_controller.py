@@ -36,6 +36,32 @@ def fixture():
 
 
 class ControllerTests(unittest.TestCase):
+    def test_provider_failure_is_archived_without_promoting_practice_patch(self):
+        trace={"id":"trace-failed","stop_condition":"provider_error","errors":[{"type":"ProviderError","message":"Disconnected"}],"info":{},
+               "nodes":[{"message":{"role":"assistant","tool_calls":[{"name":"repair_test_edits","arguments":"{\"edits\":[]}"}]}},
+                        {"message":{"role":"tool","name":"repair_test_edits","content":json.dumps({"practice_only":True,"candidate_mean":20,"target_replay":{"prevented_recorded_miss":True}})}}]}
+        summary={"trace_id":"trace-failed","environment_id":"owner/env@1","activity":{"model_turns":1}}
+        status={"evaluation_id":"eval-failed","status":"FAILED"}
+        def prime(args):
+            if args[:2]==["traces","list"]: return json.dumps({"items":[summary]})
+            if args[:2]==["traces","get"]: return json.dumps(trace)
+            return "Provider disconnected"
+        with tempfile.TemporaryDirectory() as folder, patch.object(control,"RUN",Path(folder)), patch.object(control,"prime",side_effect=prime):
+            control.save(Path(folder)/"state.json",{"completed_rounds":0,"current_hash":"incumbent","history":[]})
+            control.archive_failure(0,status)
+            control.archive_failure(0,status)
+            state=control.read(Path(folder)/"state.json")
+            self.assertEqual(state["completed_rounds"],0)
+            self.assertEqual(state["current_hash"],"incumbent")
+            self.assertEqual(state["history"],[])
+            self.assertEqual(len(state["execution_failures"]),1)
+            report=state["execution_failures"][0]
+            self.assertFalse(report["promoted"])
+            self.assertFalse(report["independent_verifier_completed"])
+            self.assertEqual(report["final_submission_calls"],0)
+            self.assertEqual(report["best_practice_mean"],20)
+            self.assertTrue((Path(folder)/"round-00"/"trace.json").exists())
+
     def prepared_fixture(self):
         args=self.failure_fixture()
         t,s,_,plan,_,_=args

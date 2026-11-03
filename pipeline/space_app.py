@@ -53,6 +53,8 @@ def status_text():
             rows.append(f"| {item['round']+1} | — | {reason} | Rejected; incumbent retained |")
     text = f"### Current published policy\n\n**{manifest['label']}** · {len(manifest['history'])} completed repair rounds.\n\n"
     text += "\n".join(rows) if manifest["history"] else "The deliberately faulty starting policy is published. No repair has been promoted yet."
+    for failure in manifest.get("execution_failures", []):
+        text += f"\n\n**Hosted attempt stopped: {failure['outcome']}.** {failure.get('activity',{}).get('model_turns',0)} model turns; {failure['valid_practice_results']} valid practice results; {failure['final_submission_calls']} final submissions. No weights were promoted from this failed attempt. [View evaluation](https://app.primeintellect.ai/dashboard/evaluations/{failure['evaluation_id']})."
     text += f"\n\n[View model and full audit](https://huggingface.co/{MODEL_ID}) · [Pipeline source](https://github.com/HarleyCoops/weight-space-breakout-pipeline)\n\nCurrent model revision: `{revision}`"
     if manifest.get("run_plan",{}).get("protocol_id") == "failure-driven-v2":
         text += "\n\nProtocol: prepared tools for inspection and practice, with no model-turn limit. The final action submits the weight edit. Acceptance requires catching the recorded miss and broader improvement. Playing here uses the published weights; it does not launch another editor job."

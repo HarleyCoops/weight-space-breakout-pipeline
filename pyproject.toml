@@ -1,6 +1,6 @@
 [project]
 name = "weight-space-breakout"
-version = "0.4.1"
+version = "0.4.2"
 description = "An independent grid Breakout simulator and weight-repair benchmark"
 requires-python = ">=3.11"
 dependencies = ["numpy==2.4.1", "verifiers==0.4.0; sys_platform != 'win32'"]

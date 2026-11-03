@@ -1,5 +1,5 @@
 """Independent Breakout rules; not the original paper's environment."""
-__version__ = "0.4.1"
+__version__ = "0.4.2"
 from .game import Breakout
 from .policy import Policy
 

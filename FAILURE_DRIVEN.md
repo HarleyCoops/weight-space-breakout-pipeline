@@ -1,6 +1,6 @@
 # Repairing an observed failure without a known diagnosis
 
-**Current version:** [0.4.1 prepares the tools and removes the editor-turn cap](PREPARED_EDITOR.md).
+**Current version:** [0.4.2 prepares the tools and removes the editor-turn cap](PREPARED_EDITOR.md).
 The results below remain the historical 0.3.0 trial; they have not been relabelled.
 
 Version 0.3.0 adds `failure-driven-v1`. The input is a failed game and its policy,

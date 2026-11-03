@@ -90,7 +90,8 @@ def apply_edits(base, payload, max_edits=64):
         raise ValueError('Expected {"edits": [...]}')
     edits = payload["edits"]
     if not isinstance(edits, list) or len(edits) > max_edits:
-        raise ValueError(f"At most {max_edits} scalar edits")
+        count = len(edits) if isinstance(edits, list) else "a non-list"
+        raise ValueError(f"Received {count} assignments; at most {max_edits} scalar edits. Omit unchanged weights and reduce the patch before retrying; do not split it across calls.")
     p = Policy(base.weights)
     seen = set()
     for e in edits:
@@ -101,7 +102,7 @@ def apply_edits(base, payload, max_edits=64):
             raise ValueError("Unknown tensor or invalid index")
         shape = SHAPES[name]
         if len(idx) != len(shape) or any(type(i) is not int or not 0 <= i < n for i, n in zip(idx, shape)):
-            raise ValueError("Out-of-bounds index")
+            raise ValueError(f"Out-of-bounds index {idx} for {name}, shape {shape}; valid indices are zero-based. Correct this entry before retrying.")
         if type(value) not in (int, float) or not np.isfinite(value) or abs(value) > 100:
             raise ValueError("Values must be finite numbers in [-100, 100]")
         key = (name, tuple(idx))
