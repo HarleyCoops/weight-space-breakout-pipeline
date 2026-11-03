@@ -1,5 +1,10 @@
 # Hosted iterative weight repair
 
+**Current extension:** version 0.3.0 implements [failure-driven repair](FAILURE_DRIVEN.md)
+with unknown-cause diagnosis, practice tools, and a controlled replay check. Fresh
+controller plans use that protocol. The description below records the completed
+initial 0.2.1 experiment; its scores and no-tool protocol are unchanged.
+
 This extends the original one-shot experiment into a bounded feedback loop. It starts
 from the deliberately bad reversed-controls teaching policy, not a language model.
 The completed demonstration used environment 0.2.1. The subsequent 0.2.2 release
@@ -49,14 +54,14 @@ The earlier one-shot model and its demo remain available as a separate experimen
 Each round records its starting checkpoint, exact response, candidate hash, verifier
 report, accept/reject decision, published revision, and deployed episode result.
 
-## Future experiments: tools allowed
+## Tool-assisted failure diagnosis: now implemented
 
-This first run establishes the complete handoff and uses one response per round.
-Future experiments will explicitly allow tools and multiple turns: inspecting tensors,
-running permitted practice games, testing candidate edits, and revising them before
-submission. That requires a new task/harness configuration and a declared interaction
-and compute budget; it is not enabled by clicking Play in the demonstration.
-The current controller intentionally enforces this first run's single-response protocol.
+The first run used one response per round. Version 0.3.0 adds the separate
+`failure-driven-v1` configuration: tools and practice simulations, up to eight editor
+turns, an explicit diagnosis, and both targeted replay and broad evaluation gates.
+See [the failure protocol](FAILURE_DRIVEN.md) for exact budgets and validation status.
+Clicking Play in the existing demonstration does not launch an editor experiment.
+The controller still enforces the original protocol when resuming its frozen plan.
 
 Keep the final evaluation and promotion logic outside the editor's writable runtime.
 Tool-assisted editors should receive practice feedback while the trusted verifier

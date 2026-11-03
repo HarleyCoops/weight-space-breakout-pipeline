@@ -8,6 +8,7 @@ from unittest.mock import patch
 from pipeline import control
 from weight_space_breakout.policy import faulty_policy, apply_edits, repair_edits
 from weight_space_breakout.repair_loop import fingerprint
+from weight_space_breakout.failures import failure_case, replay_failure
 
 
 def fixture():
@@ -34,6 +35,43 @@ def fixture():
 
 
 class ControllerTests(unittest.TestCase):
+    def failure_fixture(self):
+        args=fixture()
+        t,s,submission,plan,base,index=args
+        plan.update(protocol_id="failure-driven-v1",max_model_calls=8,max_tool_calls=24,max_output_tokens=16384)
+        case=failure_case(base,314159)
+        t["task"]["data"]["failure_case_json"]=json.dumps(case)
+        explanation={"diagnosis":"Observed miss; cause is a hypothesis.","expected_prevention":"Catch the recorded contact."}
+        edits=json.loads(t["nodes"][-1]["message"]["content"])
+        t["nodes"][-1]["message"]["content"]=json.dumps({**explanation,**edits})
+        t["calls"][0]["usage"]={"completion_tokens":100}
+        report=t["info"]["repair_pipeline"]
+        report.update(failure_case=case,baseline_replay=replay_failure(base,case),
+                      candidate_replay=replay_failure(base,case),explanation=explanation,
+                      accepted=False,selected_hash=fingerprint(base))
+        report["gate"].update(seed_start=1060000,seed_end=1060511)
+        t["rewards"]["improvement"]["score"]=0.
+        return args
+
+    def test_broad_gain_cannot_promote_when_specific_miss_remains(self):
+        args=self.failure_fixture()
+        result=control.validate_trace(*args)
+        self.assertFalse(result[2]["accepted"])
+        args[0]["info"]["repair_pipeline"]["accepted"]=True
+        with self.assertRaises(ValueError): control.validate_trace(*args)
+
+    def test_tools_are_allowed_only_in_new_protocol_and_within_budget(self):
+        args=self.failure_fixture()
+        args[1]["activity"].update(model_calls=2,tool_calls=1,tool_results=1)
+        toolcall=copy.deepcopy(args[0]["calls"][0])
+        toolcall["finish_reason"]="tool_calls"
+        args[0]["calls"].insert(0,toolcall)
+        args[0]["nodes"].insert(0,{"message":{"role":"assistant","content":"","tool_calls":[{"id":"test-tool","function":{"name":"bash","arguments":"{}"}}]}})
+        args[0]["nodes"].insert(1,{"message":{"role":"tool","content":"Practice result"}})
+        control.validate_trace(*args)
+        args[1]["activity"]["tool_calls"]=25
+        with self.assertRaises(ValueError): control.validate_trace(*args)
+
     def test_valid_result_and_tampered_report(self):
         args = fixture()
         self.assertEqual(fingerprint(control.validate_trace(*args)[1]),args[0]["info"]["repair_pipeline"]["selected_hash"])

@@ -53,6 +53,10 @@ def status_text():
     text = f"### Current published policy\n\n**{manifest['label']}** · {len(manifest['history'])} completed repair rounds.\n\n"
     text += "\n".join(rows) if manifest["history"] else "The deliberately faulty starting policy is published. No repair has been promoted yet."
     text += f"\n\n[View model and full audit](https://huggingface.co/{MODEL_ID}) · [Pipeline source](https://github.com/HarleyCoops/weight-space-breakout-pipeline)\n\nCurrent model revision: `{revision}`"
+    if manifest.get("run_plan",{}).get("protocol_id") == "failure-driven-v1":
+        text += "\n\nProtocol: failure-driven diagnosis with tools. The editor targets a specific recorded miss; acceptance requires both a successful controlled replay and broader improvement."
+    else:
+        text += "\n\nProtocol: initial experiment, one response per round with no tool calls."
     if manifest.get("final_audit"):
         audit = manifest["final_audit"]
         text += f"\n\nFinal independent audit ({audit['episodes']} games): initial faulty policy **{audit['baseline_return']:.3f}**, final selected policy **{audit['candidate_return']:.3f}**. This audit was not used to choose edits."
@@ -116,8 +120,9 @@ This is a bounded experiment, with three editor attempts in its first run. Every
 is recorded, and edits that fail the improvement gate are rejected. The next attempt starts
 from the most recently accepted policy. The editor receives failure examples and prior-round
 feedback; this is a different protocol from our earlier one-shot experiment.
-Future experiments will allow tools and multiple editor turns with a declared budget.
-This first run used one response per round, with no tool calls, to establish the pipeline.
+The protocol and budget are recorded with the published checkpoint. The initial run
+used one response per round with no tool calls. The failure-driven extension allows
+tools and asks the editor to diagnose and prevent a specific recorded miss.
 
 **Playing here does not rewrite weights or call the editor.** This page runs the policy
 published by the pipeline. **Play latest weights** fetches the newest published checkpoint

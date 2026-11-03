@@ -5,6 +5,12 @@ Prime-hosted Qwen and Prime-hosted games, then publishes to Hugging Face CPU Bas
 The process running the controller needs no GPU. It does need network access,
 authenticated Prime CLI, and Hugging Face repository write permission.
 
+Fresh plans use `failure-driven-v1` from environment 0.3.0. The editor diagnoses an
+observed failure and can use tools and practice simulations for up to eight model
+turns per round. Acceptance requires both preventing that miss and broader improvement.
+See [the exact protocol and validation status](../FAILURE_DRIVEN.md). Previously saved
+plans retain their original single-response/no-tool behavior.
+
 ## Setup
 
 1. Install Python 3.11+ and `uv`, clone the source repository, and open its root.
@@ -38,7 +44,8 @@ uv run --no-project --with-requirements pipeline/requirements.txt python pipelin
 HF repository IDs and run directory must remain unchanged when resuming. The source
 Space's links to the original experiment and source repository remain as attribution.
 Compute and token charges apply on Prime. There is no automatic periodic schedule.
-The controller allows at most three completed editor attempts in the frozen plan;
+The default frozen plan allows three rounds, with up to eight model calls and 16,384
+output tokens per round in the new protocol;
 it stops a still-running evaluation after a 15-minute wait. The platform's own
 evaluation timeout is 60 minutes. Infrastructure failure stops the pipeline for
 inspection rather than silently choosing a different candidate.
@@ -49,8 +56,9 @@ inspection rather than silently choosing a different candidate.
 waits for Prime, validates the trace and verifier arithmetic, publishes the selected
 checkpoint, and calls the Space using that immutable revision. It repeats for three
 rounds, then publishes the independent final audit. The controller checks publication
-hashes, exactly one editor call, zero tool calls, model identity, evaluation seeds,
-candidate edits, and exact deployment episode equivalence.
+hashes, the recorded model/tool budget, model identity, evaluation seeds, failure-case
+identity, targeted replay outcomes, candidate edits, and exact deployment episode equivalence.
+Legacy plans continue to require exactly one editor call and zero tool calls.
 
 The verifier, not the LLM, computes scores. The LLM returns JSON assignments to
 existing tensors; its text is never executed by the controller. The experiment
@@ -93,5 +101,6 @@ after installing NumPy and safetensors. Those tests run local toy games; they ar
 separate from the experiment's hosted evaluations. The controller tests use synthetic
 traces and catch tampered metrics, unexpected tools, and incorrect promotion records.
 
-Future tool-assisted experiments need a different harness/task configuration and
-interaction budget. See [the protocol](../PIPELINE.md#future-experiments-tools-allowed).
+The current taskset supplies the tool-assisted configuration through its failure-driven
+mode; the controller writes the matching harness limits into the hosted request.
+Practice scores are untrusted diagnostics. Only the independent verifier promotes edits.

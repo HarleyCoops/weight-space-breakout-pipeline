@@ -22,6 +22,7 @@ sys.path.insert(0, str(ROOT))
 from weight_space_breakout import __version__
 from weight_space_breakout.policy import faulty_policy, tracking_policy, apply_edits, parse_submission, SHAPES
 from weight_space_breakout.repair_loop import fingerprint, from_sparse, passes_gate
+from weight_space_breakout.failures import parse_failure_submission, case_digest
 
 RUN = Path(os.environ.get("REPAIR_RUN_DIR", ROOT / "artifacts/iterative-repair"))
 MODEL_ID = os.environ.get("REPAIR_MODEL_ID", "HarleyCooper/weight-space-breakout-iterative")
@@ -84,10 +85,11 @@ def initialize():
     plan = {"created_at": dt.datetime.now(dt.timezone.utc).isoformat(), "rounds": 3,
             "environment": f"harleycooper/weight-space-breakout@{__version__}",
             "editor": "qwen/qwen3.6-35b-a3b", "max_tokens": 4096, "temperature": 0,
-            "initial_fault": "reversed_controls", "practice_seeds": "40000+32*r .. 40031+32*r",
-            "promotion_seeds": "60000+512*r .. 60511+512*r", "final_audit_seeds": [90000, 91023],
-            "promotion_rule": "changed>0 and gain>0.10 and gain-2*paired_SE>0",
-            "protocol": "One hosted editor response per round, no tool use, previous-round feedback, no gradients. Fresh selection seeds, final audit never used for promotion.",
+            "protocol_id":"failure-driven-v1", "max_model_calls":8,"max_tool_calls":24,"max_output_tokens":16384,
+            "initial_fault": "reversed_controls", "practice_seeds": "1040000..1040031; failure search 1040000+32*r .. 1040031+32*r",
+            "promotion_seeds": "1060000+512*r .. 1060511+512*r", "final_audit_seeds": [1090000, 1091023],
+            "promotion_rule": "prevent recorded miss AND changed>0 AND gain>0.10 AND gain-2*paired_SE>0",
+            "protocol": "Observe a miss, infer a cause, use tools and practice simulations, submit diagnosis and edits. Freeze history and randomness for targeted replay; also require broad improvement. No gradients. Final audit never used for promotion.",
             "model_repo": MODEL_ID, "space_repo": SPACE_ID}
     save(RUN / "plan.json", plan)
     base = faulty_policy("reversed_controls")
@@ -121,11 +123,21 @@ def submit(index):
     env_args = {"iterative": True, "policy_snapshot_b64": base64.b64encode(snapshot.encode()).decode(), "policy_sha256": state["current_hash"],
                 "round_index": index, "final_round": index == plan["rounds"]-1,
                 "previous_feedback_b64": base64.b64encode(json.dumps(feedback).encode()).decode()}
+    if plan.get("protocol_id") == "failure-driven-v1":
+        seed = 314159
+        if index:
+            deployed = read(RUN / f"round-{index-1:02d}" / "deployment-check.json")
+            if deployed["policy_hash"] != state["current_hash"]:
+                raise ValueError("Failure handoff belongs to different deployed weights")
+            seed = deployed["seed"] if deployed["reason"] == "miss" else -1
+        env_args.update(failure_driven=True,failure_seed=seed,max_editor_turns=plan["max_model_calls"])
     save(folder / "environment-args.json", env_args)
     save(folder / "baseline-policy.json", json.loads(snapshot))
     # TOML avoids shell quoting of the nested snapshot and keeps the request reviewable.
     config = f'model = {json.dumps(plan["editor"])}\nnum_examples = 1\nrollouts_per_example = 1\nmax_tokens = {plan["max_tokens"]}\ntemperature = 0\nmax_concurrent = 1\n\n[[eval]]\nenv_id = {json.dumps(plan["environment"])}\n[eval.env_args.taskset]\n'
     config += "\n".join(k + " = " + (str(v).lower() if isinstance(v, bool) else json.dumps(v)) for k, v in env_args.items()) + "\n"
+    if plan.get("protocol_id") == "failure-driven-v1":
+        config += f'\n[eval.env_args.agent]\nmax_turns = {plan["max_model_calls"]}\nmax_output_tokens = {plan["max_output_tokens"]}\n'
     config_path = folder / "eval.toml"
     config_path.write_text(config, encoding="utf-8")
     path = str(config_path)
@@ -159,27 +171,42 @@ def check_comparison(report, count, start):
 
 
 def validate_trace(trace, summary, submission, plan, baseline, index):
+    failure_driven = plan.get("protocol_id") == "failure-driven-v1"
     if trace["run"]["id"] != submission["evaluation_id"] or summary["environment_id"] != plan["environment"]:
         raise ValueError("Trace belongs to a different run or environment")
     if not trace.get("ok") or not trace.get("is_completed") or trace.get("is_timeout") or trace.get("errors"):
         raise ValueError("Incomplete or errored trace; do not silently retry an editor attempt")
     activity = summary["activity"]
-    if activity["model_calls"] != 1 or activity["tool_calls"] != 0 or activity["tool_results"] != 0:
+    if failure_driven:
+        if not 1 <= activity["model_calls"] <= plan["max_model_calls"] or activity["tool_calls"] > plan["max_tool_calls"]:
+            raise ValueError("Tool-assisted editor exceeded its recorded budget")
+    elif activity["model_calls"] != 1 or activity["tool_calls"] != 0 or activity["tool_results"] != 0:
         raise ValueError("Protocol requires exactly one model response and no tool use")
     if summary["execution"]["has_error"] or summary["execution"]["is_truncated"]:
         raise ValueError("Trace execution failed")
-    if len(trace["calls"]) != 1:
+    if len(trace["calls"]) != activity["model_calls"]:
         raise ValueError("Unexpected number of model calls")
-    call = trace["calls"][0]
-    if call["model"] != plan["editor"] or call["finish_reason"] != "stop":
+    call = trace["calls"][-1]
+    if call["finish_reason"] != "stop" or any(c["model"] != plan["editor"] or c["finish_reason"] not in ("stop","tool_calls") for c in trace["calls"]):
         raise ValueError("Wrong editor or incomplete generation")
-    if call["sampling"].get("temperature") != plan["temperature"] or call["sampling"].get("max_tokens") != plan["max_tokens"]:
+    if any(c["sampling"].get("temperature") != plan["temperature"] or c["sampling"].get("max_tokens") != plan["max_tokens"] for c in trace["calls"]):
         raise ValueError("Sampling settings changed")
+    if failure_driven and sum(c["usage"]["completion_tokens"] for c in trace["calls"]) > plan["max_output_tokens"]:
+        raise ValueError("Editor exceeded total output token budget")
     replies = [n["message"] for n in trace["nodes"] if n["message"]["role"] == "assistant"]
-    if len(replies) != 1 or any(n["message"].get("tool_calls") or n["message"]["role"] == "tool" for n in trace["nodes"]):
+    if not replies or (not failure_driven and (len(replies) != 1 or any(n["message"].get("tool_calls") or n["message"]["role"] == "tool" for n in trace["nodes"]))):
         raise ValueError("Unexpected assistant or tool messages")
     report = trace["info"]["repair_pipeline"]
     data = trace["task"]["data"]
+    if bool(data.get("failure_case_json")) != failure_driven:
+        raise ValueError("Wrong repair protocol in hosted task")
+    if failure_driven:
+        case = json.loads(data["failure_case_json"])
+        if case != report["failure_case"] or case_digest(case) != case["case_id"] or case["policy_hash"] != fingerprint(baseline):
+            raise ValueError("Failure handoff identity mismatch")
+        before = report["baseline_replay"]
+        if before["case_id"] != case["case_id"] or before["prevented_recorded_miss"] or before["reason"] != "miss" or not before["same_ball_contact"]:
+            raise ValueError("Baseline failed to reproduce the target miss")
     if data["round_index"] != index or fingerprint(from_sparse(data["loop_policy"])) != fingerprint(baseline):
         raise ValueError("Hosted task did not use the submitted policy")
     if report["round_index"] != index or report["baseline_hash"] != submission["baseline_hash"] or fingerprint(baseline) != report["baseline_hash"]:
@@ -188,7 +215,10 @@ def validate_trace(trace, summary, submission, plan, baseline, index):
         raise ValueError("Unexpected verifier version")
     candidate, valid = baseline, False
     try:
-        payload = parse_submission(replies[0]["content"])
+        if failure_driven:
+            payload, explanation = parse_failure_submission(replies[-1]["content"])
+        else:
+            payload = parse_submission(replies[-1]["content"])
         candidate = apply_edits(baseline, payload)
         valid = True
     except (ValueError, TypeError, OverflowError, RecursionError):
@@ -199,8 +229,16 @@ def validate_trace(trace, summary, submission, plan, baseline, index):
         if payload != report["edits"] or fingerprint(candidate) != report["candidate_hash"]:
             raise ValueError("Candidate identity mismatch")
         changed = sum(int(np.count_nonzero(candidate.weights[k] != baseline.weights[k])) for k in SHAPES)
-        check_comparison(report["gate"],512,60000+512*index)
-        if changed != report["changed_parameters"] or passes_gate(report["gate"],changed) != report["accepted"]:
+        check_comparison(report["gate"],512,(1060000 if failure_driven else 60000)+512*index)
+        accepted = passes_gate(report["gate"],changed)
+        if failure_driven:
+            replay = report["candidate_replay"]
+            if explanation != report["explanation"] or replay["case_id"] != case["case_id"]:
+                raise ValueError("Diagnosis or replay identity mismatch")
+            if replay["prevented_recorded_miss"] and (not replay["same_ball_contact"] or replay["reason"] == "miss" or replay["ball"][0] != 8 or replay["step"] != case["failure_step"]):
+                raise ValueError("Claimed prevention disagrees with replay outcome")
+            accepted = bool(accepted and replay["prevented_recorded_miss"])
+        if changed != report["changed_parameters"] or accepted != report["accepted"]:
             raise ValueError("Promotion decision disagrees with declared gate")
     elif report["accepted"]:
         raise ValueError("Invalid candidate was accepted")
@@ -210,13 +248,13 @@ def validate_trace(trace, summary, submission, plan, baseline, index):
     if bool(data["final_round"]) != (index == plan["rounds"]-1):
         raise ValueError("Unexpected final-audit scheduling")
     if index == plan["rounds"]-1:
-        check_comparison(report["final_audit"],1024,90000)
+        check_comparison(report["final_audit"],1024,1090000 if failure_driven else 90000)
     elif "final_audit" in report:
         raise ValueError("Final audit was revealed before the last round")
     editor = {"trace_id":trace["id"], "evaluation_id":submission["evaluation_id"], "model":call["model"],
-              "prompt":data["prompt"], "response":replies[0]["content"], "call":call,
+              "prompt":data["prompt"], "response":replies[-1]["content"], "call":call, "calls":trace["calls"],
               "activity":activity, "advertised_tools":[t.get("name",t.get("function",{}).get("name")) for t in summary.get("tool_definitions",[])],
-              "protocol_note":"The hosted harness advertised tools. The prompt prohibited tool use; the trace confirms zero tool calls. Tools were not technically unavailable."}
+              "protocol_note":("Tools and practice simulations permitted under the run's recorded budget; scoring runs outside the editor's writable runtime." if failure_driven else "The hosted harness advertised tools. The prompt prohibited tool use; the trace confirms zero tool calls. Tools were not technically unavailable.")}
     return candidate, selected, report, editor
 
 
@@ -251,12 +289,18 @@ def collect(index):
     save(folder / "candidate-policy.json",candidate.sparse())
     save(folder / "verifier-report.json",report)
     save(folder / "editor-response.json",editor)
+    if "failure_case" in report:
+        save(folder / "failure-case.json",report["failure_case"])
+        save(folder / "failure-replay.json",{"baseline":report["baseline_replay"],"candidate":report.get("candidate_replay")})
     feedback = {"accepted":report["accepted"], "valid":report["valid"],
                 "edits":report.get("edits"), "changed_parameters":report.get("changed_parameters",0)}
     if report["valid"]:
         feedback.update({k:report["gate"][k] for k in ("baseline_return","candidate_return","gain","paired_standard_error")})
     else:
         feedback["error"] = report.get("error")
+    if "failure_case" in report:
+        feedback.update(explanation=report.get("explanation"),failure_case_id=report["failure_case"]["case_id"],
+                        prevented_recorded_miss=report.get("candidate_replay",{}).get("prevented_recorded_miss",False))
     item = {"round":index, "accepted":report["accepted"], "baseline_hash":report["baseline_hash"],
             "candidate_hash":report.get("candidate_hash"), "selected_hash":report["selected_hash"],
             "evaluation_id":submission["evaluation_id"], "trace_id":trace["id"], "feedback":feedback}
@@ -315,7 +359,7 @@ def publish_model(force=False):
         source = RUN / f"round-{index:02d}"
         target = audit / f"round-{index:02d}"
         target.mkdir(exist_ok=True)
-        for name in ("baseline-policy.json", "candidate-policy.json", "verifier-report.json", "editor-response.json", "submission.json", "deployment-check.json"):
+        for name in ("baseline-policy.json", "candidate-policy.json", "verifier-report.json", "editor-response.json", "submission.json", "deployment-check.json", "failure-case.json", "failure-replay.json"):
             if (source / name).exists():
                 shutil.copy2(source / name, target / name)
     rows = ["| Round | Incumbent | Candidate | Mean gain | Decision |", "| --- | ---: | ---: | ---: | --- |"]
@@ -329,7 +373,8 @@ def publish_model(force=False):
     card += f"**Current weights: {manifest['label']}.** This is a 17,253-parameter game controller, not a language model.\n\n"
     card += f"[Live simulation](https://huggingface.co/spaces/{SPACE_ID}) · [Pipeline source](https://github.com/HarleyCoops/weight-space-breakout-pipeline) · [Prime environment](https://app.primeintellect.ai/dashboard/environments/harleycooper/weight-space-breakout)\n\n"
     card += "The editor and all experiment game evaluations run on Prime. The simulation runs on Hugging Face CPU. A lightweight controller serializes and publishes verified weights. This iterative feedback protocol is separate from the earlier one-shot experiment.\n\n"
-    card += "\n".join(rows) + "\n\nEach row uses 512 fresh matched seeds, so means in different rows are not directly comparable. Rejected candidates remain in the audit; the root checkpoint always contains the incumbent. The first run is capped at three editor responses.\n\n"
+    card += "\n".join(rows) + "\n\nEach row uses 512 fresh matched seeds, so means in different rows are not directly comparable. Rejected candidates remain in the audit; the root checkpoint always contains the incumbent.\n\n"
+    card += ("This failure-driven run allows tools and up to eight editor calls per round. Acceptance also requires catching the specific recorded miss under a controlled replay.\n\n" if plan.get("protocol_id") == "failure-driven-v1" else "This initial run used one editor response and no tool calls per round.\n\n")
     if state.get("final_audit"):
         a = state["final_audit"]
         card += f"## Final audit\n\nOn {a['episodes']} separate seeds, initial faulty return **{a['baseline_return']:.4f}** and final selected return **{a['candidate_return']:.4f}**; paired gain **{a['gain']:+.4f}**, paired standard error **{a['paired_standard_error']:.4f}**. This final audit was not fed to the editor or used to select a policy.\n\n"
@@ -362,9 +407,9 @@ def verify_deployment(index):
             raise ValueError("Deployment record belongs to another revision")
         return saved
     report = read(folder / "verifier-report.json")
-    result = Client(SPACE_ID,verbose=False).predict(seed=314159,revision=publication["revision"],api_name="/episode")
-    deployed = result[1]
     expected = report["selected_episode"]
+    result = Client(SPACE_ID,verbose=False).predict(seed=expected["seed"],revision=publication["revision"],api_name="/episode")
+    deployed = result[1]
     if deployed["revision"] != publication["revision"] or deployed["policy_hash"] != report["selected_hash"] or deployed["model_id"] != MODEL_ID:
         raise ValueError("Space served a different checkpoint")
     if any(deployed[k] != expected[k] for k in ("seed","step","return","bricks_remaining","reason")):
