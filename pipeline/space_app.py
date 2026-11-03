@@ -116,6 +116,8 @@ This is a bounded experiment, with three editor attempts in its first run. Every
 is recorded, and edits that fail the improvement gate are rejected. The next attempt starts
 from the most recently accepted policy. The editor receives failure examples and prior-round
 feedback; this is a different protocol from our earlier one-shot experiment.
+Future experiments will allow tools and multiple editor turns with a declared budget.
+This first run used one response per round, with no tool calls, to establish the pipeline.
 
 **Playing here does not rewrite weights or call the editor.** This page runs the policy
 published by the pipeline. **Play latest weights** fetches the newest published checkpoint
