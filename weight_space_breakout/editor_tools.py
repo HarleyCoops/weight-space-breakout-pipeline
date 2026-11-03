@@ -54,3 +54,7 @@ class RepairTools(vf.Toolset[vf.ToolsetConfig, EditorState]):
         self.state.submission_sha256 = hashlib.sha256(text.encode()).hexdigest()
         return {"submitted": True, "submission_sha256": self.state.submission_sha256,
                 "message": "Final edit recorded. This attempt is complete; independent verification follows."}
+
+
+if __name__ == "__main__":
+    RepairTools.run()

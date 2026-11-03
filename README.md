@@ -1,6 +1,6 @@
 # Weight Space Breakout: hosted repair pipeline
 
-**New in 0.4.0:** [prepared practice tools and a final submission action](PREPARED_EDITOR.md),
+**New in 0.4.1:** [prepared practice tools and a final submission action](PREPARED_EDITOR.md),
 with no editor-turn limit. Startup prepares the numerical tools, and the last action
 commits the proposed weight edit for independent verification. Tool calling is enabled.
 

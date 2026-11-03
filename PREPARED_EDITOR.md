@@ -1,6 +1,6 @@
 # Prepared tools and an explicit final weight edit
 
-Environment 0.4.0 introduces `failure-driven-v2`. Tool calling is enabled. The editor
+Environment 0.4.1 provides `failure-driven-v2`. Tool calling is enabled. The editor
 has **no model-turn limit, tool-call limit, or aggregate output-token limit**. The
 earlier no-tool proof of concept and the unsuccessful eight-turn trial retain their
 original records and checkpoints.
@@ -55,10 +55,17 @@ Practice seeds: `2040000..2040031`; fallback failure search:
 
 ## Validation
 
-All 35 tests pass on Linux, including startup preparation, practice execution,
+The 35-test Linux suite passed, and an additional real-server startup test passes,
+including startup preparation, practice execution,
 explicit submission, rejection after submission, and controller validation of a
 30-call trace. A hosted trial is required to verify the complete Prime-to-HF path;
 its results will be recorded here after completion.
+
+The first 0.4.0 hosted startup was cancelled during tool-server setup: its Python
+module lacked the executable entry point. No editor trace was produced. Version
+0.4.1 fixes that entry point; the additional test starts the actual server and checks
+its advertised tools. The cancelled evaluation is retained as a setup failure,
+separate from scored editor attempts.
 
 Run a fresh trial using [the controller setup guide](pipeline/README.md). Direct Prime
 users set `taskset.iterative=true`, `taskset.failure_driven=true`,

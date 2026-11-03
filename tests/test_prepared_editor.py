@@ -1,7 +1,12 @@
 import asyncio
 import json
+import os
+import subprocess
 import sys
+import tempfile
+import time
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 from weight_space_breakout.policy import faulty_policy, repair_edits
 from weight_space_breakout.failures import failure_case
@@ -25,6 +30,34 @@ class PracticeTests(unittest.TestCase):
 
 @unittest.skipIf(sys.platform == "win32", "Verifiers v1 hosted adapter runs on Linux")
 class PreparedAdapterTests(unittest.IsolatedAsyncioTestCase):
+    async def test_module_starts_real_mcp_server(self):
+        import httpx
+        with tempfile.TemporaryDirectory() as folder:
+            port_file=Path(folder)/"port"
+            env={k:v for k,v in os.environ.items() if not k.startswith("VF_")}
+            env.update(MCP_PORT_FILE=str(port_file), MCP_HOST="127.0.0.1", MCP_PORT="0", VF_CONFIG="{}")
+            with (Path(folder)/"server.log").open("w+") as log:
+                proc=subprocess.Popen([sys.executable,"-m","weight_space_breakout.editor_tools"],env=env,stdout=log,stderr=log)
+                try:
+                    deadline=time.monotonic()+20
+                    while not port_file.exists() and proc.poll() is None and time.monotonic()<deadline:
+                        await asyncio.sleep(.1)
+                    log.flush()
+                    self.assertTrue(port_file.exists(),(Path(folder)/"server.log").read_text())
+                    async with httpx.AsyncClient() as client:
+                        for _ in range(30):
+                            try:
+                                reply=await client.post(f"http://127.0.0.1:{port_file.read_text()}/mcp",headers={"Accept":"application/json, text/event-stream"},json={"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}})
+                                reply.raise_for_status()
+                                break
+                            except (httpx.ConnectError,httpx.HTTPStatusError):
+                                await asyncio.sleep(.1)
+                        names={t["name"] for t in reply.json()["result"]["tools"]}
+                        self.assertEqual(names,{"inspect_policy","test_edits","submit_edits"})
+                finally:
+                    proc.terminate()
+                    await asyncio.to_thread(proc.wait,timeout=10)
+
     async def test_preparation_tool_submission_and_stop(self):
         from weight_space_breakout.taskset import BreakoutConfig, BreakoutTaskset
         from weight_space_breakout.editor_tools import EditorState, EditorTaskConfig, RepairTools, ScalarEdit

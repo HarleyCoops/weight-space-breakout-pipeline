@@ -411,6 +411,8 @@ def publish_model(force=False):
                 "label": f"Accepted repair from round {last_accepted}" if last_accepted else "Initial faulty reversed-controls policy",
                 "history": state["history"], "parent_revision": state.get("model_revision"),
                 "final_audit": state.get("final_audit"), "run_plan": plan}
+    if state.get("setup_failures"):
+        manifest["setup_failures"] = state["setup_failures"]
     save(folder / "manifest.json", manifest)
     save(folder / "config.json", {"architecture":"tanh_mlp","dimensions":[500,32,32,5],"parameters":17253,
                                    "environment":plan["environment"],"policy_hash":fingerprint(policy)})
