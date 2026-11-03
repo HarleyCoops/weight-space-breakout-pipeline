@@ -94,7 +94,7 @@ non-use is verified from each trace. See the protocol disclosure for details.
 and verifier. `pipeline/control.py` implements the resumable bounded loop.
 `pipeline/space_app.py` serves immutable policy revisions. `tests/` covers game rules,
 invalid edits, the acceptance gate, trace tampering, tool-use checks, and interrupted
-state recovery. The original build passed 18 tests; the current suite passes 35 on Linux, including
+state recovery. The original build passed 18 tests; the current suite passes 36 on Linux, including
 failure replay, practice-tool execution, and rejecting a targeted rescue that harms
 broader play. All three original real hosted deployment
 comparisons passed. The run used environment **0.2.1**; subsequent documentation or

@@ -55,8 +55,7 @@ Practice seeds: `2040000..2040031`; fallback failure search:
 
 ## Validation
 
-The 35-test Linux suite passed, and an additional real-server startup test passes,
-including startup preparation, practice execution,
+All 36 tests pass on Linux, including real-server startup, preparation, practice execution,
 explicit submission, rejection after submission, and controller validation of a
 30-call trace. A hosted trial is required to verify the complete Prime-to-HF path;
 its results will be recorded here after completion.
@@ -65,7 +64,8 @@ The first 0.4.0 hosted startup was cancelled during tool-server setup: its Pytho
 module lacked the executable entry point. No editor trace was produced. Version
 0.4.1 fixes that entry point; the additional test starts the actual server and checks
 its advertised tools. The cancelled evaluation is retained as a setup failure,
-separate from scored editor attempts.
+separate from scored editor attempts
+([cancelled setup evaluation](https://app.primeintellect.ai/dashboard/evaluations/tub63az7xebkonisq5hr6nca)).
 
 Run a fresh trial using [the controller setup guide](pipeline/README.md). Direct Prime
 users set `taskset.iterative=true`, `taskset.failure_driven=true`,
