@@ -55,9 +55,12 @@ Practice seeds: `2040000..2040031`; fallback failure search:
 
 ## Validation
 
-All 36 tests pass on Linux, including real-server startup, preparation, practice execution,
+All 37 tests pass on Linux, including real-server startup, preparation, practice execution,
 explicit submission, rejection after submission, and controller validation of a
-30-call trace. A hosted trial is required to verify the complete Prime-to-HF path;
+30-call trace. A scripted local provider also drives the real agent harness through
+inspection, practice, and submission: the session stops with `edit_submitted`, makes
+no fourth model call, and runs the verifier. This is an integration test using a known
+fixture, not an LLM repair result. A hosted trial is required to verify the complete Prime-to-HF path;
 its results will be recorded here after completion.
 
 The first 0.4.0 hosted startup was cancelled during tool-server setup: its Python

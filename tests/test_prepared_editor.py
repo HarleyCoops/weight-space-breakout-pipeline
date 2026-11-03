@@ -32,6 +32,66 @@ class PracticeTests(unittest.TestCase):
 
 @unittest.skipIf(sys.platform == "win32", "Verifiers v1 hosted adapter runs on Linux")
 class PreparedAdapterTests(unittest.IsolatedAsyncioTestCase):
+    async def test_full_agent_stops_after_committed_edit(self):
+        """Scripted model, real harness/MCP/state/stop/scoring; no paid inference."""
+        import verifiers.v1 as vf
+        from verifiers.v1.configs.client import EvalClientConfig
+        from verifiers.v1.configs.agent import TimeoutConfig
+        from weight_space_breakout.taskset import BreakoutConfig, BreakoutTaskset
+        from weight_space_breakout.editor_tools import EditorTaskConfig
+        task=BreakoutTaskset(BreakoutConfig(iterative=True,failure_driven=True,failure_seed=314159,
+                            task=EditorTaskConfig(prepared_tools=True))).load()[0]
+        edits=repair_edits("reversed_controls")["edits"]
+        script=[("repair_inspect_policy",{"tensor":"W3"}),
+                ("repair_test_edits",{"edits":edits}),
+                ("repair_submit_edits",{"diagnosis":"Scripted lifecycle fixture",
+                  "expected_prevention":"Correct reversed direction","edits":edits})]
+        requests=[]
+        class Provider(BaseHTTPRequestHandler):
+            def do_POST(self):
+                request=json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+                index=len(requests); requests.append(request)
+                if index>=len(script):
+                    self.send_response(500); self.end_headers(); self.wfile.write(b"unexpected extra model call")
+                    return
+                name,args=script[index]
+                call={"id":f"call_{index}","type":"function","function":{"name":name,"arguments":json.dumps(args)}}
+                response={"id":f"fixture_{index}","object":"chat.completion","created":0,
+                          "model":"scripted-fixture","choices":[{"index":0,"finish_reason":"tool_calls",
+                          "message":{"role":"assistant","content":None,"tool_calls":[call]}}],
+                          "usage":{"prompt_tokens":10,"completion_tokens":10,"total_tokens":20}}
+                if request.get("stream"):
+                    response["object"]="chat.completion.chunk"
+                    choice=response["choices"][0]
+                    choice["delta"]=choice.pop("message")
+                    choice["delta"]["tool_calls"][0]["index"]=0
+                    body=("data: "+json.dumps(response)+"\n\ndata: [DONE]\n\n").encode()
+                    mime="text/event-stream"
+                else:
+                    body=json.dumps(response).encode(); mime="application/json"
+                self.send_response(200); self.send_header("Content-Type",mime)
+                self.send_header("Content-Length",str(len(body))); self.end_headers(); self.wfile.write(body)
+            def log_message(self,*args): pass
+        provider=ThreadingHTTPServer(("127.0.0.1",0),Provider)
+        worker=threading.Thread(target=provider.serve_forever,daemon=True); worker.start()
+        config=vf.AgentConfig(model="scripted-fixture",harness=vf.HarnessConfig(id="null"),
+                              runtime=vf.SubprocessConfig(),
+                              client=EvalClientConfig(base_url=f"http://127.0.0.1:{provider.server_port}/v1",api_key_var="LIFECYCLE_TEST_KEY"),
+                              sampling=vf.SamplingConfig(tool_choice="required",parallel_tool_calls=False),
+                              timeout=TimeoutConfig(setup=60,rollout=60,finalize=30,scoring=60))
+        try:
+            async with vf.Agent(config) as agent:
+                trace=await agent.run(task)
+            self.assertTrue(trace.ok,trace.model_dump_json())
+            self.assertEqual(trace.stop_condition,"edit_submitted")
+            self.assertEqual(len(requests),3)
+            self.assertEqual(trace.num_turns,3)
+            self.assertEqual(json.loads(trace.state.submission_json)["edits"],edits)
+            self.assertTrue(trace.info["repair_pipeline"]["valid"])
+            self.assertTrue(all(r["tool_choice"]=="required" and not r["parallel_tool_calls"] for r in requests))
+        finally:
+            provider.shutdown(); provider.server_close(); worker.join(timeout=5)
+
     async def test_module_starts_real_mcp_server(self):
         import httpx
         from weight_space_breakout.taskset import BreakoutConfig, BreakoutTaskset
