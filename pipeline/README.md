@@ -50,6 +50,15 @@ it stops a still-running evaluation after a 15-minute wait. The platform's own
 evaluation timeout is 60 minutes. Infrastructure failure stops the pipeline for
 inspection rather than silently choosing a different candidate.
 
+A hosted job marked `COMPLETED` can still contain an unsuccessful editor attempt.
+If the editor reaches its declared turn limit without submitting final JSON, the
+controller records `turn_limit_without_submission`, keeps the incumbent, and counts
+that attempt toward the round limit. It passes setup/tool errors to the next round
+as feedback. It never extracts a candidate from unfinished tool-call arguments.
+Unexpected errors, other truncation reasons, and contradictory verifier reports still
+stop publication. This distinction fixes the first live tool-assisted run's collection
+failure without replaying or discarding its first attempt.
+
 ## What happens
 
 `run` creates the faulty baseline, publishes it and the demo, submits round one,

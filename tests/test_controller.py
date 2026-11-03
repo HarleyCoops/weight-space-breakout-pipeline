@@ -35,6 +35,47 @@ def fixture():
 
 
 class ControllerTests(unittest.TestCase):
+    def exhausted_fixture(self):
+        args=self.failure_fixture()
+        t,s,_,plan,base,_=args
+        s["execution"]["is_truncated"]=True
+        s["score"]={"outcome":"max_turns","reward":0.}
+        s["activity"].update(model_calls=8,tool_calls=8,tool_results=7)
+        t["stop_condition"]="max_turns"
+        call=copy.deepcopy(t["calls"][0])
+        call["finish_reason"]="tool_calls"
+        t["calls"]=[copy.deepcopy(call) for _ in range(8)]
+        # Tool-only messages may omit content entirely (as in the real Prime trace).
+        t["nodes"]=[{"message":{"role":"assistant","tool_calls":[{"name":"bash","arguments":"{}"}]}} for _ in range(8)]
+        t["nodes"].insert(1,{"message":{"role":"tool","content":"AttributeError: 'Policy' object has no attribute 'W1'\n"}})
+        r=t["info"]["repair_pipeline"]
+        r.update(valid=False,accepted=False,reward=0.,error="Expecting value",selected_hash=fingerprint(base))
+        for key in ("edits","candidate_hash","candidate_replay","explanation","changed_parameters","gate"):
+            r.pop(key,None)
+        return args
+
+    def test_expected_turn_exhaustion_records_rejection(self):
+        args=self.exhausted_fixture()
+        _,selected,report,editor=control.validate_trace(*args)
+        self.assertFalse(report["accepted"])
+        self.assertEqual(fingerprint(selected),fingerprint(args[4]))
+        self.assertEqual(editor["outcome"],"turn_limit_without_submission")
+        self.assertIn("AttributeError",editor["tool_errors"][0])
+
+    def test_truncated_candidate_and_other_errors_remain_blocked(self):
+        args=self.exhausted_fixture()
+        args[0]["info"]["repair_pipeline"]["valid"]=True
+        with self.assertRaises(ValueError): control.validate_trace(*args)
+        args=self.exhausted_fixture()
+        args[1]["execution"]["has_error"]=True
+        with self.assertRaises(ValueError): control.validate_trace(*args)
+        args=self.exhausted_fixture()
+        args[1]["score"]["outcome"]="timeout"
+        with self.assertRaises(ValueError): control.validate_trace(*args)
+        args=self.exhausted_fixture()
+        args[0]["info"]["repair_pipeline"]["selected_hash"]="another-policy"
+        with self.assertRaises(ValueError): control.validate_trace(*args)
+
     def failure_fixture(self):
         args=fixture()
         t,s,submission,plan,base,index=args

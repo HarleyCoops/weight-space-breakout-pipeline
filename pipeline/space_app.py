@@ -49,7 +49,8 @@ def status_text():
         if "gain" in feedback:
             rows.append(f"| {item['round']+1} | {feedback['baseline_return']:.3f} | {feedback['candidate_return']:.3f} | {'Accepted' if item['accepted'] else 'Rejected; incumbent retained'} |")
         else:
-            rows.append(f"| {item['round']+1} | — | Invalid submission | Rejected |")
+            reason = "No submission: turn limit" if feedback.get("outcome") == "turn_limit_without_submission" else "Invalid submission"
+            rows.append(f"| {item['round']+1} | — | {reason} | Rejected; incumbent retained |")
     text = f"### Current published policy\n\n**{manifest['label']}** · {len(manifest['history'])} completed repair rounds.\n\n"
     text += "\n".join(rows) if manifest["history"] else "The deliberately faulty starting policy is published. No repair has been promoted yet."
     text += f"\n\n[View model and full audit](https://huggingface.co/{MODEL_ID}) · [Pipeline source](https://github.com/HarleyCoops/weight-space-breakout-pipeline)\n\nCurrent model revision: `{revision}`"
