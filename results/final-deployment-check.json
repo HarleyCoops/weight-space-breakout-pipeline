@@ -1,0 +1,11 @@
+{
+  "revision": "186627060d6cbff07d2ecb274f2346c7eb3be6c6",
+  "policy_hash": "bc358004215825c5de41208d3ce22abcae2ed40a480ce383f3cf8e17a0788a6a",
+  "exact_verifier_match": true,
+  "fresh_seeds": [
+    806609951,
+    4205505743
+  ],
+  "exact_replay_match": true,
+  "space_runtime": "RUNNING"
+}
