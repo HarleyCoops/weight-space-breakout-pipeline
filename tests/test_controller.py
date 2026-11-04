@@ -100,6 +100,37 @@ class ControllerTests(unittest.TestCase):
         result=control.validate_trace(*self.prepared_fixture())
         self.assertEqual(result[3]["outcome"],"submitted")
 
+    def retry_fixture(self):
+        args=self.prepared_fixture()
+        t,s,_,plan,_,_=args
+        retry={"model":plan["editor"],"sampling":copy.deepcopy(t["calls"][0]["sampling"]),
+               "error":{"type":"ProviderError","status_code":429,"message":"Too many concurrent hosted model requests"}}
+        t["calls"].insert(0,retry)
+        s["activity"]["model_calls"]+=1
+        return args
+
+    def test_successful_submission_preserves_recovered_provider_request(self):
+        args=self.retry_fixture()
+        result=control.validate_trace(*args)
+        self.assertEqual(result[3]["recovered_provider_requests"],1)
+        self.assertEqual(len(result[3]["calls"]),31)
+        self.assertEqual(result[3]["outcome"],"submitted")
+
+    def test_provider_retry_cannot_hide_partial_output_or_failed_run(self):
+        for mutation in ("partial_usage","assistant_node","finish_reason","fatal_trace","trailing_error","wrong_model","wrong_sampling","wrong_error"):
+            args=self.retry_fixture()
+            t=args[0];retry=t["calls"][0]
+            if mutation=="partial_usage": retry["usage"]={"completion_tokens":1}
+            if mutation=="assistant_node": retry["node"]=0
+            if mutation=="finish_reason": retry["finish_reason"]="tool_calls"
+            if mutation=="fatal_trace": t["errors"]=[retry["error"]]
+            if mutation=="trailing_error": t["calls"].append(t["calls"].pop(0))
+            if mutation=="wrong_model": retry["model"]="different-editor"
+            if mutation=="wrong_sampling": retry["sampling"]["temperature"]=0.9
+            if mutation=="wrong_error": retry["error"]["status_code"]=401
+            with self.subTest(mutation=mutation),self.assertRaises(ValueError):
+                control.validate_trace(*args)
+
     def test_basic_repair_accepts_broad_gain_with_unrescued_diagnostic_miss(self):
         args=self.prepared_fixture()
         t,_,_,plan,_,_=args

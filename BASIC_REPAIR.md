@@ -28,6 +28,11 @@ The final action remains `repair_submit_edits`. Its `expected_prevention` field 
 retained for receipt compatibility; in this protocol it describes the expected
 behavioral improvement, without claiming guaranteed prevention of the example miss.
 
+The collector preserves failed HTTP request attempts. A recovered transient request
+with no assistant output does not invalidate a later completed submission. Partial
+generations, terminal trace errors, changed sampling, and missing final receipts
+remain failures; this does not weaken the policy promotion rule.
+
 The temperature differs from the earlier trial. Qwen's published coding guidance
 uses nonzero sampling; this trial uses temperature 0.6 but does not claim to reproduce
 every setting in that preset. This is an engineering milestone, not an isolated

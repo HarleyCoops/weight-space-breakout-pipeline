@@ -223,12 +223,31 @@ def validate_trace(trace, summary, submission, plan, baseline, index):
         raise ValueError("Trace execution failed: " + str(summary.get("score",{}).get("outcome","unknown stop")))
     if len(trace["calls"]) != activity["model_calls"]:
         raise ValueError("Unexpected number of model calls")
-    call = trace["calls"][-1]
-    if (call["finish_reason"] != ("tool_calls" if prepared else "stop") and not exhausted) or any(c["model"] != plan["editor"] or (c["finish_reason"] not in ("stop","tool_calls") and not (token_limit and i == len(trace["calls"])-1 and c["finish_reason"] == "length")) for i,c in enumerate(trace["calls"])):
+    completed_calls = []
+    recovered_requests = []
+    for request in trace["calls"]:
+        if request.get("error"):
+            error = request["error"]
+            # VF records a rejected HTTP request without an assistant node,
+            # finish reason, or token usage. A later successful retry is not
+            # another proposal. Never ignore partial output or terminal errors.
+            if (not prepared or error.get("type") != "ProviderError"
+                    or error.get("status_code") not in (408,429,500,502,503,504)
+                    or request.get("node") is not None
+                    or request.get("finish_reason") is not None
+                    or request.get("usage")):
+                raise ValueError("Unrecoverable or partially generated model request")
+            recovered_requests.append(request)
+        else:
+            completed_calls.append(request)
+    if not completed_calls or trace["calls"][-1].get("error"):
+        raise ValueError("No completed final model response")
+    call = completed_calls[-1]
+    if (call.get("finish_reason") != ("tool_calls" if prepared else "stop") and not exhausted) or any(c["model"] != plan["editor"] for c in trace["calls"]) or any(c.get("finish_reason") not in ("stop","tool_calls") and not (token_limit and i == len(completed_calls)-1 and c.get("finish_reason") == "length") for i,c in enumerate(completed_calls)):
         raise ValueError("Wrong editor or incomplete generation")
     if any(c["sampling"].get("temperature") != plan["temperature"] or c["sampling"].get("max_tokens") != plan["max_tokens"] for c in trace["calls"]):
         raise ValueError("Sampling settings changed")
-    if failure_driven and plan["max_output_tokens"] is not None and sum(c["usage"]["completion_tokens"] for c in trace["calls"]) > plan["max_output_tokens"]:
+    if failure_driven and plan["max_output_tokens"] is not None and sum(c["usage"]["completion_tokens"] for c in completed_calls) > plan["max_output_tokens"]:
         raise ValueError("Editor exceeded total output token budget")
     replies = [n["message"] for n in trace["nodes"] if n["message"]["role"] == "assistant"]
     if not replies or (not failure_driven and (len(replies) != 1 or any(n["message"].get("tool_calls") or n["message"]["role"] == "tool" for n in trace["nodes"]))):
@@ -320,6 +339,7 @@ def validate_trace(trace, summary, submission, plan, baseline, index):
     if prepared:
         editor["setup"] = trace["info"]["editor_setup"]
         editor["submission_receipt"] = report["submission"]
+        editor["recovered_provider_requests"] = len(recovered_requests)
     if exhausted:
         # Surface actual tool errors to the next attempt, without exporting raw
         # tool logs or changing the environment, seeds, or budget mid-experiment.
