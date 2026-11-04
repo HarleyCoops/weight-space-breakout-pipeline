@@ -32,7 +32,7 @@ class RepairTools(vf.Toolset[vf.ToolsetConfig, EditorState]):
     TOOL_PREFIX = "repair"
 
     async def setup_task(self, task):
-        self.lab = await asyncio.to_thread(PracticeSession, task.loop_policy, task.failure_case_json)
+        self.lab = await asyncio.to_thread(PracticeSession, task.loop_policy, task.failure_case_json, task.protocol_id)
 
     def require_open(self):
         if self.state.submission_json:
@@ -52,7 +52,7 @@ class RepairTools(vf.Toolset[vf.ToolsetConfig, EditorState]):
 
     @vf.tool
     async def submit_edits(self, diagnosis: str, expected_prevention: str, edits: EditList) -> dict:
-        """FINAL ACTION: commit your complete weight edit and finish this attempt. Explain the observed failure and predicted prevention. Up to 64 assignments in [-100,100]; at least one real change. The independent verifier evaluates it after submission. Do not call another tool after this."""
+        """FINAL ACTION: commit your complete weight edit and finish this attempt. Explain your diagnosis and expected behavioral improvement in expected_prevention. Up to 64 assignments in [-100,100]; at least one real change. The independent verifier evaluates the task's stated objective after submission. Do not call another tool after this."""
         self.require_open()
         text = self.lab.submission(diagnosis, expected_prevention, [e.model_dump() for e in edits])
         self.state.submission_json = text

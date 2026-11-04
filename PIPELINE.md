@@ -1,6 +1,11 @@
 # Hosted iterative weight repair
 
-**Current extension:** version 0.4.3 implements [prepared tool-assisted repair](PREPARED_EDITOR.md)
+**Basic milestone:** version 0.4.4 adds [one tool-assisted planted-fault repair](BASIC_REPAIR.md),
+selected with `REPAIR_PROTOCOL=basic-repair-v1`. It requires broader improvement;
+the specific-miss replay is diagnostic. This is distinct from the stricter
+unknown-failure objective and is not evidence of sustained recursive improvement.
+
+Version 0.4.3 implements [prepared tool-assisted repair](PREPARED_EDITOR.md)
 with no editor-turn cap and an explicit final submission tool. It extends the
 [failure-driven repair](FAILURE_DRIVEN.md) replay and broad-performance checks. Fresh
 controller plans use that protocol. The description below records the completed

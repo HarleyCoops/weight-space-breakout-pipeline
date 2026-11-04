@@ -118,9 +118,10 @@ def verify_failure_round(text, baseline, round_index, case, final_round=False, p
     from .repair_loop import fingerprint, comparison, passes_gate
     if type(round_index) is not int or not 0 <= round_index < 20:
         raise ValueError("Round index must be in 0..19")
-    if protocol not in ("failure-driven-v1", "failure-driven-v2"):
+    if protocol not in ("failure-driven-v1", "failure-driven-v2", "basic-repair-v1"):
         raise ValueError("Unknown failure protocol")
-    offset = 1000000 if protocol == "failure-driven-v2" else 0
+    basic = protocol == "basic-repair-v1"
+    offset = 2000000 if basic else (1000000 if protocol == "failure-driven-v2" else 0)
     if case["policy_hash"] != fingerprint(baseline):
         raise ValueError("Failure belongs to different weights")
     before = replay_failure(baseline,case)
@@ -130,7 +131,8 @@ def verify_failure_round(text, baseline, round_index, case, final_round=False, p
               "baseline_hash":fingerprint(baseline),"valid":False,"accepted":False,"reward":0.,
               "verifier":f"weight-space-breakout@{__version__}","failure_case":case,
               "baseline_replay":before,
-              "gate_rule":"prevent recorded miss AND changed>0 AND gain>0.10 AND gain-2*paired_SE>0"}
+              "gate_rule":("" if basic else "prevent recorded miss AND ")+"changed>0 AND gain>0.10 AND gain-2*paired_SE>0",
+              "target_replay_required":not basic}
     candidate = baseline
     try:
         edits, explanation = parse_failure_submission(text)
@@ -138,7 +140,7 @@ def verify_failure_round(text, baseline, round_index, case, final_round=False, p
         changed = sum(int(np.count_nonzero(candidate.weights[k] != baseline.weights[k])) for k in SHAPES)
         replay = replay_failure(candidate,case)
         gate = comparison(baseline,candidate,tuple(range(offset+1060000+512*round_index,offset+1060512+512*round_index)))
-        accepted = bool(replay["prevented_recorded_miss"] and passes_gate(gate,changed))
+        accepted = bool((basic or replay["prevented_recorded_miss"]) and passes_gate(gate,changed))
         report.update(valid=True,accepted=accepted,reward=float(accepted),edits=edits,
                       explanation=explanation,candidate_hash=fingerprint(candidate),
                       changed_parameters=changed,candidate_replay=replay,gate=gate)

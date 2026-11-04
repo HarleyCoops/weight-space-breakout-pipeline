@@ -11,13 +11,17 @@ from . import game, policy, evaluation, failures
 class PracticeSession:
     """Ready-to-use measurements, with only practice seeds exposed to the editor."""
 
-    def __init__(self, snapshot, case):
+    def __init__(self, snapshot, case, protocol="failure-driven-v2"):
         from .repair_loop import from_sparse, fingerprint
         self.base = from_sparse(snapshot)
         self.case = json.loads(case) if isinstance(case, str) else case
         if self.case["policy_hash"] != fingerprint(self.base):
             raise ValueError("Practice case belongs to a different policy")
-        self.seeds = tuple(range(2040000, 2040032))
+        if protocol not in ("failure-driven-v2", "basic-repair-v1"):
+            raise ValueError("Unknown prepared practice protocol")
+        self.basic = protocol == "basic-repair-v1"
+        start = 3040000 if self.basic else 2040000
+        self.seeds = tuple(range(start, start+32))
         self.before = [evaluation.rollout(self.base, s)["return"] for s in self.seeds]
         self.baseline_replay = failures.replay_failure(self.base, self.case)
         self.request_counts = {}
@@ -33,6 +37,7 @@ class PracticeSession:
                 "practice_games": len(self.seeds), "baseline_mean": float(np.mean(self.before)),
                 "baseline_replay": self.baseline_replay,
                 "assignment_limit": 64, "value_range": [-100,100],
+                "objective": "Improve broad game performance; target replay is diagnostic only" if self.basic else "Prevent the recorded miss and improve broad game performance",
                 "best_practice_patch": self.best,
                 "usage": "Call test_edits with scalar assignments, then submit_edits as your final action. No installation or file access is needed."}
 
@@ -49,9 +54,9 @@ class PracticeSession:
         after = [evaluation.rollout(candidate, s)["return"] for s in self.seeds]
         replay = failures.replay_failure(candidate, self.case)
         mean = float(np.mean(after))
-        rank = (replay["prevented_recorded_miss"],mean)
-        if self.best is None or rank > (self.best["prevented_recorded_miss"],self.best["candidate_mean"]):
-            self.best = {"edits":edits,"prevented_recorded_miss":rank[0],"candidate_mean":mean}
+        rank = (True if self.basic else replay["prevented_recorded_miss"],mean)
+        if self.best is None or rank > (True if self.basic else self.best["prevented_recorded_miss"],self.best["candidate_mean"]):
+            self.best = {"edits":edits,"prevented_recorded_miss":replay["prevented_recorded_miss"],"candidate_mean":mean}
         return {"practice_only": True, "valid":True, "target_replay": replay,
                 "practice_games": len(self.seeds), "baseline_mean": float(np.mean(self.before)),
                 "candidate_mean": mean, "practice_gain": float(np.mean(np.asarray(after)-self.before)),

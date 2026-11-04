@@ -52,13 +52,19 @@ class PracticeTests(unittest.TestCase):
 @unittest.skipIf(sys.platform == "win32", "Verifiers v1 hosted adapter runs on Linux")
 class PreparedAdapterTests(unittest.IsolatedAsyncioTestCase):
     async def test_full_agent_stops_after_committed_edit(self):
+        await self.run_scripted_agent(False)
+
+    async def test_basic_agent_promotes_broad_repair_without_target_rescue(self):
+        await self.run_scripted_agent(True)
+
+    async def run_scripted_agent(self,basic):
         """Scripted model, real harness/MCP/state/stop/scoring; no paid inference."""
         import verifiers.v1 as vf
         from verifiers.v1.configs.client import EvalClientConfig
         from verifiers.v1.configs.agent import TimeoutConfig
         from weight_space_breakout.taskset import BreakoutConfig, BreakoutTaskset
         from weight_space_breakout.editor_tools import EditorTaskConfig
-        task=BreakoutTaskset(BreakoutConfig(iterative=True,failure_driven=True,failure_seed=314159,
+        task=BreakoutTaskset(BreakoutConfig(iterative=True,failure_driven=True,failure_seed=314159,basic_repair=basic,
                             task=EditorTaskConfig(prepared_tools=True))).load()[0]
         edits=repair_edits("reversed_controls")["edits"]
         script=[("repair_inspect_policy",{"tensor":"W3"}),
@@ -107,6 +113,11 @@ class PreparedAdapterTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(trace.num_turns,3)
             self.assertEqual(json.loads(trace.state.submission_json)["edits"],edits)
             self.assertTrue(trace.info["repair_pipeline"]["valid"])
+            report=trace.info["repair_pipeline"]
+            self.assertEqual(report["protocol"],"basic-repair-v1" if basic else "failure-driven-v2")
+            self.assertEqual(report["target_replay_required"],not basic)
+            self.assertFalse(report["candidate_replay"]["prevented_recorded_miss"])
+            self.assertEqual(report["accepted"],basic)
             self.assertTrue(all(r["tool_choice"]=="required" and not r["parallel_tool_calls"] for r in requests))
         finally:
             provider.shutdown(); provider.server_close(); worker.join(timeout=5)

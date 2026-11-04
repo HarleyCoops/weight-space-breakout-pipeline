@@ -100,6 +100,36 @@ class ControllerTests(unittest.TestCase):
         result=control.validate_trace(*self.prepared_fixture())
         self.assertEqual(result[3]["outcome"],"submitted")
 
+    def test_basic_repair_accepts_broad_gain_with_unrescued_diagnostic_miss(self):
+        args=self.prepared_fixture()
+        t,_,_,plan,_,_=args
+        plan["protocol_id"]="basic-repair-v1"
+        t["task"]["data"]["protocol_id"]="basic-repair-v1"
+        report=t["info"]["repair_pipeline"]
+        report.update(protocol="basic-repair-v1",target_replay_required=False,
+                      accepted=True,selected_hash=report["candidate_hash"])
+        report["gate"].update(seed_start=3060000,seed_end=3060511)
+        t["rewards"]["improvement"]["score"]=1.
+        self.assertFalse(report["candidate_replay"]["prevented_recorded_miss"])
+        self.assertTrue(control.validate_trace(*args)[2]["accepted"])
+        report["target_replay_required"]=True
+        with self.assertRaisesRegex(ValueError,"diagnostic-only"):
+            control.validate_trace(*args)
+
+    def test_basic_plan_has_separate_seeds_and_one_round(self):
+        with tempfile.TemporaryDirectory() as folder, patch.object(control,"RUN",Path(folder)), patch.dict(control.os.environ,{"REPAIR_PROTOCOL":"basic-repair-v1"}), patch.object(control,"prime",return_value="Evaluation ID: basic-test"):
+            plan=control.initialize()
+            self.assertEqual(plan["rounds"],1)
+            self.assertEqual(plan["temperature"],0.6)
+            self.assertFalse(plan["target_replay_required"])
+            self.assertEqual(plan["final_audit_seeds"],[3090000,3091023])
+            control.submit(0)
+            config=tomllib.loads((Path(folder)/"round-00"/"eval.toml").read_text(encoding="utf-8"))
+            task=config["eval"][0]["env_args"]["taskset"]
+            self.assertTrue(task["basic_repair"])
+            self.assertTrue(task["final_round"])
+            self.assertTrue(task["task"]["prepared_tools"])
+
     def test_prepared_editor_requires_real_committed_final_edit(self):
         for mutation in ("wrong_tool","no_stop","tampered_commit","not_prepared","tools_optional"):
             args=self.prepared_fixture()
