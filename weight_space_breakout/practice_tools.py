@@ -17,10 +17,11 @@ class PracticeSession:
         self.case = json.loads(case) if isinstance(case, str) else case
         if self.case["policy_hash"] != fingerprint(self.base):
             raise ValueError("Practice case belongs to a different policy")
-        if protocol not in ("failure-driven-v2", "basic-repair-v1"):
+        if protocol not in ("failure-driven-v2", "basic-repair-v1", "qualified-repair-v1"):
             raise ValueError("Unknown prepared practice protocol")
-        self.basic = protocol == "basic-repair-v1"
-        start = 3040000 if self.basic else 2040000
+        self.qualified = protocol == "qualified-repair-v1"
+        self.basic = protocol in ("basic-repair-v1", "qualified-repair-v1")
+        start = 4040000 if self.qualified else (3040000 if self.basic else 2040000)
         self.seeds = tuple(range(start, start+32))
         self.before = [evaluation.rollout(self.base, s)["return"] for s in self.seeds]
         self.baseline_replay = failures.replay_failure(self.base, self.case)
@@ -39,7 +40,7 @@ class PracticeSession:
                 "assignment_limit": 64, "value_range": [-100,100],
                 "objective": "Improve broad game performance; target replay is diagnostic only" if self.basic else "Prevent the recorded miss and improve broad game performance",
                 "best_practice_patch": self.best,
-                "usage": "Call test_edits with scalar assignments, then submit_edits as your final action. No installation or file access is needed."}
+                "usage": ("Call propose_edits with diagnosis, expected_prevention, and a complete edit. The first practice-qualified proposal is automatically committed for independent verification." if self.qualified else "Call test_edits with scalar assignments, then submit_edits as your final action. No installation or file access is needed.")}
 
     def test(self, edits):
         key = hashlib.sha256(json.dumps(edits,sort_keys=True,allow_nan=False).encode()).hexdigest()
@@ -54,6 +55,11 @@ class PracticeSession:
         after = [evaluation.rollout(candidate, s)["return"] for s in self.seeds]
         replay = failures.replay_failure(candidate, self.case)
         mean = float(np.mean(after))
+        delta = np.asarray(after)-self.before
+        gain = float(delta.mean())
+        se = float(delta.std(ddof=1)/np.sqrt(len(delta)))
+        changed = sum(int(np.count_nonzero(candidate.weights[k] != self.base.weights[k])) for k in policy.SHAPES)
+        qualified = bool(changed > 0 and gain > 0.10 and gain-2*se > 0)
         rank = (True if self.basic else replay["prevented_recorded_miss"],mean)
         if self.best is None or rank > (True if self.basic else self.best["prevented_recorded_miss"],self.best["candidate_mean"]):
             self.best = {"edits":edits,"prevented_recorded_miss":replay["prevented_recorded_miss"],"candidate_mean":mean}
@@ -62,11 +68,14 @@ class PracticeSession:
                 "objective": "Improve broad game performance; target replay is diagnostic only" if self.basic else "Prevent the recorded miss and improve broad game performance",
                 "target_replay": replay,
                 "practice_games": len(self.seeds), "baseline_mean": float(np.mean(self.before)),
-                "candidate_mean": mean, "practice_gain": float(np.mean(np.asarray(after)-self.before)),
+                "candidate_mean": mean, "practice_gain": gain,
+                "practice_paired_standard_error":se, "changed_parameters":changed,
+                "practice_qualified":qualified,
                 "repeated_patch":repeated,
-                "next_step": ("You do not need to rescue the recorded miss in this basic trial. Focus on broad improvement and submit your best tested proposal. " if self.basic else "")+
+                "next_step": ("The proposal tool commits the first practice-qualified edit automatically. If this proposal does not qualify, revise it; identical proposals cannot yield new evidence. Target replay is diagnostic only." if self.qualified else
+                             ("You do not need to rescue the recorded miss in this basic trial. Focus on broad improvement and submit your best tested proposal. " if self.basic else "")+
                              ("This exact patch was already tested; repeating it gives no new evidence. Change the hypothesis or submit your best valid tested patch. " if repeated else "")+
-                             "When ready, call submit_edits with your diagnosis, expected_prevention, and final assignments. inspect_policy can recover your best practice patch. A final submission is required even if you remain uncertain; independent verification can reject it."}
+                             "When ready, call submit_edits with your diagnosis, expected_prevention, and final assignments. inspect_policy can recover your best practice patch. A final submission is required even if you remain uncertain; independent verification can reject it.")}
 
     def submission(self, diagnosis, expected_prevention, edits):
         text = json.dumps(dict(diagnosis=diagnosis, expected_prevention=expected_prevention, edits=edits), allow_nan=False)

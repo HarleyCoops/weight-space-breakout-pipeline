@@ -56,7 +56,9 @@ def status_text():
     for failure in manifest.get("execution_failures", []):
         text += f"\n\n**Hosted attempt stopped: {failure['outcome']}.** {failure.get('activity',{}).get('model_turns',0)} model turns; {failure['valid_practice_results']} valid practice results; {failure['final_submission_calls']} final submissions. No weights were promoted from this failed attempt. [View evaluation](https://app.primeintellect.ai/dashboard/evaluations/{failure['evaluation_id']})."
     text += f"\n\n[View model and full audit](https://huggingface.co/{MODEL_ID}) · [Pipeline source](https://github.com/HarleyCoops/weight-space-breakout-pipeline)\n\nCurrent model revision: `{revision}`"
-    if manifest.get("run_plan",{}).get("protocol_id") == "basic-repair-v1":
+    if manifest.get("run_plan",{}).get("protocol_id") == "qualified-repair-v1":
+        text += "\n\nProtocol: the LLM proposes weight edits using prepared tools. The first edit that passes the 32-game practice check is frozen automatically, ending editing. A separate 512-game verifier can still reject it; only accepted weights replace the published policy. There is no editor-turn cap. This tests one planted-fault repair. Playing here uses the published weights and never launches an editor job."
+    elif manifest.get("run_plan",{}).get("protocol_id") == "basic-repair-v1":
         text += "\n\nProtocol: one tool-assisted repair of a deliberately damaged teaching policy, with no editor-turn limit. Broad improvement decides acceptance; the recorded-miss replay is diagnostic only. This is an initial repair-and-deployment test, not evidence of sustained recursive or unknown-failure repair. Playing here uses the published weights and does not launch an editor job."
     elif manifest.get("run_plan",{}).get("protocol_id") == "failure-driven-v2":
         text += "\n\nProtocol: prepared tools for inspection and practice, with no model-turn limit. The final action submits the weight edit. Acceptance requires catching the recorded miss and broader improvement. Playing here uses the published weights; it does not launch another editor job."

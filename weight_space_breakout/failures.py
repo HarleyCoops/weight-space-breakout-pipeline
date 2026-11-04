@@ -118,10 +118,11 @@ def verify_failure_round(text, baseline, round_index, case, final_round=False, p
     from .repair_loop import fingerprint, comparison, passes_gate
     if type(round_index) is not int or not 0 <= round_index < 20:
         raise ValueError("Round index must be in 0..19")
-    if protocol not in ("failure-driven-v1", "failure-driven-v2", "basic-repair-v1"):
+    if protocol not in ("failure-driven-v1", "failure-driven-v2", "basic-repair-v1", "qualified-repair-v1"):
         raise ValueError("Unknown failure protocol")
-    basic = protocol == "basic-repair-v1"
-    offset = 2000000 if basic else (1000000 if protocol == "failure-driven-v2" else 0)
+    qualified = protocol == "qualified-repair-v1"
+    basic = protocol in ("basic-repair-v1", "qualified-repair-v1")
+    offset = 3000000 if qualified else (2000000 if basic else (1000000 if protocol == "failure-driven-v2" else 0))
     if case["policy_hash"] != fingerprint(baseline):
         raise ValueError("Failure belongs to different weights")
     before = replay_failure(baseline,case)
@@ -138,6 +139,11 @@ def verify_failure_round(text, baseline, round_index, case, final_round=False, p
         edits, explanation = parse_failure_submission(text)
         candidate = apply_edits(baseline,edits)
         changed = sum(int(np.count_nonzero(candidate.weights[k] != baseline.weights[k])) for k in SHAPES)
+        if qualified:
+            qualification = comparison(baseline,candidate,tuple(range(4040000,4040032)))
+            report["practice_qualification"] = qualification
+            if not passes_gate(qualification,changed):
+                raise ValueError("Committed proposal does not satisfy the frozen practice qualification rule")
         replay = replay_failure(candidate,case)
         gate = comparison(baseline,candidate,tuple(range(offset+1060000+512*round_index,offset+1060512+512*round_index)))
         accepted = bool((basic or replay["prevented_recorded_miss"]) and passes_gate(gate,changed))

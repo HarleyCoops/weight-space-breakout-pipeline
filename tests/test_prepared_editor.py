@@ -65,7 +65,10 @@ class PreparedAdapterTests(unittest.IsolatedAsyncioTestCase):
     async def test_basic_agent_promotes_broad_repair_without_target_rescue(self):
         await self.run_scripted_agent(True)
 
-    async def run_scripted_agent(self,basic):
+    async def test_qualified_agent_ends_on_first_qualifying_proposal(self):
+        await self.run_scripted_agent(True,qualified=True)
+
+    async def run_scripted_agent(self,basic,qualified=False):
         """Scripted model, real harness/MCP/state/stop/scoring; no paid inference."""
         import verifiers.v1 as vf
         from verifiers.v1.configs.client import EvalClientConfig
@@ -73,12 +76,23 @@ class PreparedAdapterTests(unittest.IsolatedAsyncioTestCase):
         from weight_space_breakout.taskset import BreakoutConfig, BreakoutTaskset
         from weight_space_breakout.editor_tools import EditorTaskConfig
         task=BreakoutTaskset(BreakoutConfig(iterative=True,failure_driven=True,failure_seed=314159,basic_repair=basic,
-                            task=EditorTaskConfig(prepared_tools=True))).load()[0]
+                            final_round=qualified,
+                            task=EditorTaskConfig(prepared_tools=True,qualified_proposals=qualified))).load()[0]
         edits=repair_edits("reversed_controls")["edits"]
         script=[("repair_inspect_policy",{"tensor":"W3"}),
                 ("repair_test_edits",{"edits":edits}),
                 ("repair_submit_edits",{"diagnosis":"Scripted lifecycle fixture",
                   "expected_prevention":"Correct reversed direction","edits":edits})]
+        if qualified:
+            # Test fixture only, never supplied to the hosted editor.
+            edits=edits+[{"tensor":"b3","index":[4],"value":2.0}]
+            # An inert edit to a zero outgoing neuron changes weights but not play.
+            script=[("repair_inspect_policy",{"tensor":"W3"}),
+                    ("repair_propose_edits",{"diagnosis":"Nonqualifying lifecycle fixture",
+                     "expected_prevention":"Check that zero gain leaves editing open",
+                     "edits":[{"tensor":"b2","index":[31],"value":1.0}]}),
+                    ("repair_propose_edits",{"diagnosis":"Qualifying lifecycle fixture",
+                     "expected_prevention":"Correct reversed direction","edits":edits})]
         requests=[]
         class Provider(BaseHTTPRequestHandler):
             def do_POST(self):
@@ -122,13 +136,49 @@ class PreparedAdapterTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(json.loads(trace.state.submission_json)["edits"],edits)
             self.assertTrue(trace.info["repair_pipeline"]["valid"])
             report=trace.info["repair_pipeline"]
-            self.assertEqual(report["protocol"],"basic-repair-v1" if basic else "failure-driven-v2")
+            self.assertEqual(report["protocol"],"qualified-repair-v1" if qualified else ("basic-repair-v1" if basic else "failure-driven-v2"))
             self.assertEqual(report["target_replay_required"],not basic)
-            self.assertFalse(report["candidate_replay"]["prevented_recorded_miss"])
+            self.assertEqual(report["candidate_replay"]["prevented_recorded_miss"],qualified)
             self.assertEqual(report["accepted"],basic)
+            if qualified:
+                self.assertEqual(trace.state.valid_proposals,2)
+                self.assertEqual(report["submission"]["source"],"repair_propose_edits")
+                self.assertEqual(report["practice_qualification"]["seed_start"],4040000)
+                self.assertEqual(report["gate"]["seed_start"],4060000)
+                self.assertEqual(report["final_audit"]["seed_start"],4090000)
+                names={t["function"]["name"] for t in requests[0]["tools"]}
+                self.assertEqual(names,{"repair_inspect_policy","repair_propose_edits"})
+                from pipeline.control import check_first_qualification
+                wire=trace.model_dump(mode="json")
+                last=next(n["message"] for n in reversed(wire["nodes"]) if n["message"]["role"]=="assistant")
+                check_first_qualification(wire,report["submission"],last["tool_calls"][0])
             self.assertTrue(all(r["tool_choice"]=="required" and not r["parallel_tool_calls"] for r in requests))
         finally:
             provider.shutdown(); provider.server_close(); worker.join(timeout=5)
+
+    async def test_qualification_commits_once_and_keeps_nonqualifying_edit_open(self):
+        from weight_space_breakout.taskset import BreakoutConfig,BreakoutTaskset
+        from weight_space_breakout.editor_tools import EditorTaskConfig,EditorState,ScalarEdit
+        from weight_space_breakout.qualified_tools import QualifiedRepairTools
+        config=BreakoutConfig(iterative=True,failure_driven=True,basic_repair=True,failure_seed=314159,
+                             task=EditorTaskConfig(prepared_tools=True,qualified_proposals=True))
+        task=BreakoutTaskset(config).load()[0]
+        tools=QualifiedRepairTools(config.task.tools)
+        await tools.setup_task(task.data)
+        tools._inert_state=EditorState()
+        inert=[ScalarEdit(tensor="b2",index=[31],value=1.0)]
+        first=await tools.propose_edits("Test inert feature","No expected return gain",inert)
+        self.assertFalse(first["submitted"])
+        self.assertFalse(tools.state.submission_json)
+        edits=[ScalarEdit(**e) for e in repair_edits("reversed_controls")["edits"]]
+        edits.append(ScalarEdit(tensor="b3",index=[4],value=2.0))
+        result=await tools.propose_edits("Direction hypothesis","Direction correction should help",edits)
+        self.assertTrue(result["submitted"])
+        self.assertNotIn("accepted",result)
+        receipt=tools.state.submission_json
+        with self.assertRaises(ValueError):
+            await tools.propose_edits("Another hypothesis","Try another change",inert)
+        self.assertEqual(tools.state.submission_json,receipt)
 
     async def test_module_starts_real_mcp_server(self):
         import httpx

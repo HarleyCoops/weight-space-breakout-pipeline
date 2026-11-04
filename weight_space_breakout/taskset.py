@@ -9,6 +9,9 @@ from .policy import FAULTS, faulty_policy, repair_edits
 from .repair_loop import from_sparse, fingerprint, practice_feedback, verify_round
 from .failures import find_failure, parse_failure_submission, verify_failure_round
 from .editor_tools import EditorState, EditorTaskConfig, RepairTools
+from .qualified_tools import QualifiedRepairTools
+
+PREPARED_PROTOCOLS = ("failure-driven-v2", "basic-repair-v1", "qualified-repair-v1")
 
 RULES = """Independent Breakout v1. Rows/columns 0..9; outer ring is walls.
 Paddle is three cells on row 8, moves before ball. Left/right move one cell, center clamped
@@ -71,17 +74,20 @@ def prompt_for(fault):
 class BreakoutTask(vf.Task[BreakoutData, EditorState, EditorTaskConfig]):
     @classmethod
     def toolsets(cls, config):
+        if config.qualified_proposals:
+            return [QualifiedRepairTools(config.tools)]
         return [RepairTools(config.tools)] if config.prepared_tools else []
 
     async def setup(self, trace: vf.Trace, runtime: vf.Runtime) -> None:
-        if self.data.protocol_id in ("failure-driven-v2", "basic-repair-v1"):
+        if self.data.protocol_id in PREPARED_PROTOCOLS:
             from .practice_tools import PracticeSession
             import numpy as np
             lab = await asyncio.to_thread(PracticeSession, self.data.loop_policy, self.data.failure_case_json, self.data.protocol_id)
             trace.info["editor_setup"] = {"ready": True, "numpy_version": np.__version__,
                 "practice_games": len(lab.seeds), "baseline_mean": float(np.mean(lab.before)),
-                "baseline_replay": lab.baseline_replay, "tools": ["repair_inspect_policy", "repair_test_edits", "repair_submit_edits"],
-                "max_editor_turns": None, "final_action": "repair_submit_edits"}
+                "baseline_replay": lab.baseline_replay,
+                "tools": ["repair_inspect_policy","repair_propose_edits"] if lab.qualified else ["repair_inspect_policy", "repair_test_edits", "repair_submit_edits"],
+                "max_editor_turns": None, "final_action": "repair_propose_edits" if lab.qualified else "repair_submit_edits"}
             return
         if self.data.failure_case_json:
             from .practice_tools import practice_bundle, PRACTICE_SCRIPT
@@ -93,11 +99,11 @@ class BreakoutTask(vf.Task[BreakoutData, EditorState, EditorTaskConfig]):
 
     @vf.stop
     async def edit_submitted(self, trace: vf.Trace) -> bool:
-        return self.data.protocol_id in ("failure-driven-v2", "basic-repair-v1") and bool(trace.state.submission_json)
+        return self.data.protocol_id in PREPARED_PROTOCOLS and bool(trace.state.submission_json)
 
     @vf.stop
     async def single_turn(self, trace: vf.Trace) -> bool:
-        if self.data.protocol_id in ("failure-driven-v2", "basic-repair-v1"):
+        if self.data.protocol_id in PREPARED_PROTOCOLS:
             return False
         if self.data.failure_case_json:
             if trace.num_turns >= self.data.max_editor_turns:
@@ -116,12 +122,14 @@ class BreakoutTask(vf.Task[BreakoutData, EditorState, EditorTaskConfig]):
     async def improvement(self, trace: vf.Trace) -> float:
         if self.data.loop_policy:
             if self.data.failure_case_json:
-                prepared = self.data.protocol_id in ("failure-driven-v2", "basic-repair-v1")
+                prepared = self.data.protocol_id in PREPARED_PROTOCOLS
                 answer = trace.state.submission_json if prepared else (trace.last_reply or "")
                 report = await asyncio.to_thread(verify_failure_round, answer, from_sparse(self.data.loop_policy), self.data.round_index, json.loads(self.data.failure_case_json), self.data.final_round, self.data.protocol_id if prepared else "failure-driven-v1")
                 if prepared:
-                    report["submission"] = {"source":"repair_submit_edits", "json":answer,
+                    report["submission"] = {"source":"repair_propose_edits" if self.data.protocol_id == "qualified-repair-v1" else "repair_submit_edits", "json":answer,
                                             "sha256":trace.state.submission_sha256}
+                    if self.data.protocol_id == "qualified-repair-v1":
+                        report["submission"]["valid_proposal_number"] = trace.state.valid_proposals
             else:
                 report = await asyncio.to_thread(verify_round, trace.last_reply or "", from_sparse(self.data.loop_policy), self.data.round_index, self.data.final_round)
             trace.info["repair_pipeline"] = report
@@ -140,6 +148,8 @@ class BreakoutTask(vf.Task[BreakoutData, EditorState, EditorTaskConfig]):
 
 class BreakoutTaskset(vf.Taskset[BreakoutTask, BreakoutConfig]):
     def load(self) -> list[BreakoutTask]:
+        if self.config.task.qualified_proposals and not self.config.basic_repair:
+            raise ValueError("Qualified proposals require the basic repair objective")
         if self.config.basic_repair and not (self.config.iterative and self.config.failure_driven and self.config.task.prepared_tools):
             raise ValueError("Basic repair requires the iterative prepared-tool workflow")
         if self.config.iterative:
@@ -154,17 +164,22 @@ class BreakoutTaskset(vf.Taskset[BreakoutTask, BreakoutConfig]):
             if self.config.failure_driven:
                 prepared = self.config.task.prepared_tools
                 basic = self.config.basic_repair
-                protocol = "basic-repair-v1" if basic else ("failure-driven-v2" if prepared else "failure-driven-v1")
+                qualified = self.config.task.qualified_proposals
+                protocol = "qualified-repair-v1" if qualified else ("basic-repair-v1" if basic else ("failure-driven-v2" if prepared else "failure-driven-v1"))
                 if (not prepared and not 1 <= self.config.max_editor_turns <= 8) or not -1 <= self.config.failure_seed < 2**32:
                     raise ValueError("Invalid tool budget or failure seed")
                 case = find_failure(policy,self.config.round_index,None if self.config.failure_seed == -1 else self.config.failure_seed,
-                                    3040000 if basic else (2040000 if prepared else 1040000))
+                                    4040000 if qualified else (3040000 if basic else (2040000 if prepared else 1040000)))
                 prompt = RULES.split("This is a handwritten")[0]
                 if basic:
                     prompt += "\nBASIC REPAIR TRIAL: this small handwritten teaching policy was deliberately damaged. Improve its overall game performance through at most 64 scalar weight assignments in [-100,100]. Infer useful changes from the weights, game rules, and practice feedback; no correct edits are supplied. The recorded miss below is diagnostic evidence only. You do NOT have to prevent that particular miss: acceptance depends on broad improvement on separate games. In expected_prevention explain the behavioral improvement you predict, without claiming guaranteed prevention. This trial tests repair of a planted fault, not unknown-failure repair.\n"
                 else:
                     prompt += "\nThe CURRENT policy failed in the recorded episode below. The cause is unknown. Diagnose the observed behavior, propose up to 64 scalar weight assignments in [-100,100], and explain the concrete behavioral change you expect to prevent this miss. Do not assume a particular planted fault or that a single bad weight exists. A sampled action can fail even when it is not the most likely action. Earlier decisions, missing features, and limited representation are also possibilities. Your explanation is a hypothesis, not a verified causal conclusion.\n"
-                if prepared:
+                if qualified:
+                    prompt += "Tool calling is enabled and required. Tools and NumPy are prepared. Use repair_inspect_policy to inspect weights and baseline results. Use repair_propose_edits with diagnosis, expected_prevention, and the complete weight edit to test a proposal on 32 practice games. Each proposal starts from the current baseline. No gradient training.\n"
+                    prompt += "FINISHING RULE: the FIRST proposal with an actual weight change, practice mean gain>0.10, and gain>2*paired standard error is AUTOMATICALLY frozen and submitted to the independent verifier. That qualifying edit proposal is your final action; there is no separate submit tool or decision to keep searching after qualification. A practice-qualified proposal can still fail the independent promotion test. If a proposal does not qualify, use its feedback to revise it. There is no editor-turn or aggregate-output-token limit, but operational timeouts still apply.\n"
+                    prompt += "At most64 scalar assignments per complete patch, each in [-100,100]. Omit unchanged weights. Separate proposals do not accumulate changes. Fix input errors and do not repeat identical proposals: fixed practice randomness makes repetitions uninformative. The diagnostic target miss need not be rescued.\n"
+                elif prepared:
                     prompt += "Tool calling is enabled and required. The practice tools and NumPy are already prepared; do not install anything or explore files. There is no model-turn or total-output-token limit in this protocol. Use repair_inspect_policy to inspect weights and baseline results, and repair_test_edits to test a COMPLETE proposed patch on the recorded failure and 32 practice games. Each practice call starts from the current baseline. Practice scores are not the independent promotion test. No gradient training. Keep tool calls and explanations focused.\n"
                     prompt += "Your FINAL action MUST be repair_submit_edits with diagnosis, expected_prevention, and your complete edits. This commits the actual proposal and ends the attempt. Use practice feedback to revise your hypothesis; when you have a concrete proposal, submit it. Do not finish with analysis, a plan, or a text-only answer. A submitted proposal may fail verification; submit your best tested change rather than waiting for certainty.\n"
                     prompt += "A patch contains only assignments you want to change, not a copy of the full network. Count the assignments before calling a tool: at most 64 TOTAL per patch. Omit unchanged entries. Calls start from the baseline, so splitting a large patch across calls does not accumulate changes. Fix validation errors before retrying. Repeating an identical patch cannot produce new evidence because the practice games use fixed randomness. If experiments stop providing useful new evidence, finish with your best valid tested proposal, even if it may fail the independent verifier.\n"

@@ -21,10 +21,12 @@ EditList = Annotated[list[ScalarEdit], Field(min_length=1, max_length=64,
 class EditorState(vf.State):
     submission_json: str = ""
     submission_sha256: str = ""
+    valid_proposals: int = 0
 
 
 class EditorTaskConfig(vf.TaskConfig):
     prepared_tools: bool = False
+    qualified_proposals: bool = False
     tools: vf.ToolsetConfig = vf.ToolsetConfig()
 
 
@@ -59,6 +61,8 @@ class RepairTools(vf.Toolset[vf.ToolsetConfig, EditorState]):
         self.state.submission_sha256 = hashlib.sha256(text.encode()).hexdigest()
         return {"submitted": True, "submission_sha256": self.state.submission_sha256,
                 "message": "Final edit recorded. This attempt is complete; independent verification follows."}
+
+
 
 
 if __name__ == "__main__":

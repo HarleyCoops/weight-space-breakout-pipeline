@@ -161,6 +161,100 @@ class ControllerTests(unittest.TestCase):
             self.assertTrue(task["final_round"])
             self.assertTrue(task["task"]["prepared_tools"])
 
+    def qualified_fixture(self):
+        args=self.prepared_fixture()
+        t,_,_,plan,_,_=args
+        plan.update(protocol_id="qualified-repair-v1",final_action="repair_propose_edits")
+        t["task"]["data"]["protocol_id"]="qualified-repair-v1"
+        t["nodes"][-1]["message"]["tool_calls"][0]["name"]="repair_propose_edits"
+        report=t["info"]["repair_pipeline"]
+        report.update(protocol="qualified-repair-v1",target_replay_required=False,
+                      accepted=True,selected_hash=report["candidate_hash"])
+        report["submission"]["source"]="repair_propose_edits"
+        report["submission"]["valid_proposal_number"]=1
+        report["gate"].update(seed_start=4060000,seed_end=4060511)
+        report["practice_qualification"]={"episodes":32,"seed_start":4040000,"seed_end":4040031,
+            "baseline_returns":[1]*32,"candidate_returns":[2]*32,
+            "baseline_return":1.,"candidate_return":2.,"gain":1.,"paired_standard_error":0.}
+        t["nodes"][-1]["message"]["tool_calls"][0]["id"]="qualifying-call"
+        t["nodes"].append({"message":{"role":"tool","name":"repair_propose_edits","tool_call_id":"qualifying-call",
+            "content":json.dumps({"valid":True,"changed_parameters":2,"practice_gain":1.,"practice_paired_standard_error":0.,
+                "practice_qualified":True,"submitted":True,"valid_proposal_number":1,"submission_sha256":report["submission"]["sha256"]})}})
+        t["rewards"]["improvement"]["score"]=1.
+        return args
+
+    def test_qualified_plan_freezes_stopping_rule_and_separate_seeds(self):
+        with tempfile.TemporaryDirectory() as folder, patch.object(control,"RUN",Path(folder)), patch.dict(control.os.environ,{"REPAIR_PROTOCOL":"qualified-repair-v1"}), patch.object(control,"prime",return_value="Evaluation ID: qualified-test"):
+            plan=control.initialize()
+            self.assertEqual(plan["rounds"],1)
+            self.assertEqual(plan["final_action"],"repair_propose_edits")
+            self.assertIn("FIRST",plan["submission_rule"])
+            self.assertEqual(plan["final_audit_seeds"],[4090000,4091023])
+            self.assertIsNone(plan["max_model_calls"])
+            control.submit(0)
+            config=tomllib.loads((Path(folder)/"round-00"/"eval.toml").read_text(encoding="utf-8"))
+            self.assertTrue(config["eval"][0]["env_args"]["taskset"]["task"]["qualified_proposals"])
+            self.assertNotIn("max_turns",config["eval"][0]["env_args"]["agent"])
+
+    def test_qualified_edit_requires_practice_check_and_committed_proposal(self):
+        self.assertTrue(control.validate_trace(*self.qualified_fixture())[2]["accepted"])
+        for mutation in ("practice_seed","practice_arithmetic","no_qualification","wrong_final_tool","wrong_receipt_source","wrong_gate_seed"):
+            args=self.qualified_fixture();t=args[0];report=t["info"]["repair_pipeline"]
+            if mutation=="practice_seed": report["practice_qualification"]["seed_start"]+=1
+            if mutation=="practice_arithmetic": report["practice_qualification"]["gain"]=2.
+            if mutation=="no_qualification":
+                report["practice_qualification"].update(candidate_returns=[1]*32,candidate_return=1.,gain=0.)
+            if mutation=="wrong_final_tool": t["nodes"][-2]["message"]["tool_calls"][0]["name"]="repair_submit_edits"
+            if mutation=="wrong_receipt_source": report["submission"]["source"]="repair_submit_edits"
+            if mutation=="wrong_gate_seed": report["gate"]["seed_start"]=3060000
+            with self.subTest(mutation=mutation),self.assertRaises(ValueError):
+                control.validate_trace(*args)
+
+    def test_qualified_trace_cannot_skip_earlier_qualification_or_receipt(self):
+        for mutation in ("earlier_qualification","missing_state_receipt","wrong_call_id","changed_hash","continued_after_commit"):
+            args=self.qualified_fixture();t=args[0]
+            if mutation=="earlier_qualification":
+                first=copy.deepcopy(t["nodes"][-2:])
+                first[0]["message"]["tool_calls"][0]["id"]="earlier-call"
+                first[1]["message"]["tool_call_id"]="earlier-call"
+                t["nodes"]=first+t["nodes"]
+            if mutation=="missing_state_receipt":
+                t["nodes"].pop()
+                t["info"]["repair_pipeline"]["submission"].pop("valid_proposal_number")
+            if mutation=="wrong_call_id": t["nodes"][-1]["message"]["tool_call_id"]="wrong"
+            if mutation=="changed_hash":
+                r=json.loads(t["nodes"][-1]["message"]["content"]);r["submission_sha256"]="wrong"
+                t["nodes"][-1]["message"]["content"]=json.dumps(r)
+            if mutation=="continued_after_commit": t["nodes"].append({"message":{"role":"assistant","content":"Continue searching"}})
+            with self.subTest(mutation=mutation),self.assertRaises(ValueError):
+                control.validate_trace(*args)
+
+    def test_state_commit_can_precede_terminal_tool_result_in_trace(self):
+        args=self.qualified_fixture()
+        args[0]["nodes"].pop()
+        self.assertTrue(control.validate_trace(*args)[2]["accepted"])
+        args[0]["info"]["repair_pipeline"]["submission"]["valid_proposal_number"]=2
+        with self.assertRaises(ValueError): control.validate_trace(*args)
+
+    def test_practice_qualification_does_not_override_independent_rejection(self):
+        args=self.qualified_fixture();t=args[0];report=t["info"]["repair_pipeline"]
+        report["gate"].update(candidate_returns=[0]*512,candidate_return=0.,gain=-1.)
+        report.update(accepted=False,selected_hash=fingerprint(args[4]))
+        t["rewards"]["improvement"]["score"]=0.
+        _,selected,report,editor=control.validate_trace(*args)
+        self.assertFalse(report["accepted"])
+        self.assertEqual(fingerprint(selected),fingerprint(args[4]))
+        self.assertEqual(editor["submission_mode"],"first_practice_qualified_proposal")
+
+    def test_failed_qualified_attempt_counts_practice_without_salvaging_weights(self):
+        from pipeline.failure_audit import summarize_failure
+        trace={"nodes":[{"message":{"role":"assistant","tool_calls":[{"name":"repair_propose_edits","arguments":"{\"edits\":[]}"}]}},
+                        {"message":{"role":"tool","name":"repair_propose_edits","content":json.dumps({"candidate_mean":2.,"submitted":False})}}]}
+        report=summarize_failure(trace,{},dict(evaluation_id="failed",status="FAILED"),0)
+        self.assertEqual(report["valid_practice_results"],1)
+        self.assertEqual(report["final_submission_calls"],0)
+        self.assertFalse(report["promoted"])
+
     def test_prepared_editor_requires_real_committed_final_edit(self):
         for mutation in ("wrong_tool","no_stop","tampered_commit","not_prepared","tools_optional"):
             args=self.prepared_fixture()

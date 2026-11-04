@@ -1,5 +1,15 @@
 # Weight Space Breakout: hosted repair pipeline
 
+**Version 0.4.5 adds [automatic submission of the first qualifying edit](QUALIFIED_REPAIR.md).**
+The LLM proposes weight assignments using tools. The first proposal that passes the
+predefined 32-game practice check ends editing automatically; a separate 512-game
+gate still decides promotion. There is no editor-turn cap. This is a new protocol,
+not a change to any already-running trial.
+The software checks include a real tool-server lifecycle with a scripted provider:
+one nonqualifying proposal stays open, the next qualifying proposal ends editing,
+and the collector verifies the committed receipt. This is a software test, not a
+hosted LLM success claim.
+
 **Version 0.4.4 adds a separately specified [basic tool-assisted repair trial](BASIC_REPAIR.md).**
 It tests one broad improvement and the complete deployment path. The example miss is
 diagnostic only in this new protocol; prior failure-driven trials keep their stricter

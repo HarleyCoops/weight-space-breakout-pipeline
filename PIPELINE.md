@@ -1,5 +1,9 @@
 # Hosted iterative weight repair
 
+**Automatic submission:** version 0.4.5 adds [the first qualifying edit protocol](QUALIFIED_REPAIR.md),
+selected with `REPAIR_PROTOCOL=qualified-repair-v1`. Practice qualification ends
+editing automatically; independent verification still controls publication.
+
 **Basic milestone:** version 0.4.4 adds [one tool-assisted planted-fault repair](BASIC_REPAIR.md),
 selected with `REPAIR_PROTOCOL=basic-repair-v1`. It requires broader improvement;
 the specific-miss replay is diagnostic. This is distinct from the stricter

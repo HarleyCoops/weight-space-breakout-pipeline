@@ -84,9 +84,10 @@ def initialize():
     if (RUN / "plan.json").exists():
         return read(RUN / "plan.json")
     protocol = os.environ.get("REPAIR_PROTOCOL", "failure-driven-v2")
-    if protocol not in ("failure-driven-v2", "basic-repair-v1"):
+    if protocol not in ("failure-driven-v2", "basic-repair-v1", "qualified-repair-v1"):
         raise ValueError("Unknown new-run protocol")
-    basic = protocol == "basic-repair-v1"
+    qualified = protocol == "qualified-repair-v1"
+    basic = protocol in ("basic-repair-v1", "qualified-repair-v1")
     plan = {"created_at": dt.datetime.now(dt.timezone.utc).isoformat(), "rounds": 1 if basic else 3,
             "environment": f"harleycooper/weight-space-breakout@{__version__}",
             "editor": "qwen/qwen3.6-35b-a3b", "max_tokens": 16384, "temperature": 0.6 if basic else 0,
@@ -104,6 +105,12 @@ def initialize():
                     promotion_rule="changed>0 AND gain>0.10 AND gain-2*paired_SE>0",
                     target_replay_required=False,
                     protocol="One tool-assisted planted-fault repair. Broad improvement decides promotion; the recorded miss is diagnostic only. No golden edit or solver supplied. Final audit never used for promotion. This is not an unknown-failure or recursive-repair claim.")
+    if qualified:
+        plan.update(final_action="repair_propose_edits",
+                    submission_rule="Automatically freeze the FIRST proposal with changed>0 AND practice gain>0.10 AND practice gain-2*paired_SE>0",
+                    practice_seeds="4040000..4040031; diagnostic failure seed 314159",
+                    promotion_seeds="4060000..4060511", final_audit_seeds=[4090000,4091023],
+                    protocol="One tool-assisted planted-fault repair. The first practice-qualified raw LLM weight proposal ends editing automatically. The independent promotion gate may reject it; a separate final audit never selects edits. No golden edit, numerical candidate solver, or gradient training is supplied.")
     save(RUN / "plan.json", plan)
     base = faulty_policy("reversed_controls")
     save(RUN / "current-policy.json", base.sparse())
@@ -136,7 +143,7 @@ def submit(index):
     env_args = {"iterative": True, "policy_snapshot_b64": base64.b64encode(snapshot.encode()).decode(), "policy_sha256": state["current_hash"],
                 "round_index": index, "final_round": index == plan["rounds"]-1,
                 "previous_feedback_b64": base64.b64encode(json.dumps(feedback).encode()).decode()}
-    if plan.get("protocol_id") in ("failure-driven-v1","failure-driven-v2","basic-repair-v1"):
+    if plan.get("protocol_id") in ("failure-driven-v1","failure-driven-v2","basic-repair-v1","qualified-repair-v1"):
         seed = 314159
         if index:
             deployed = read(RUN / f"round-{index-1:02d}" / "deployment-check.json")
@@ -144,7 +151,7 @@ def submit(index):
                 raise ValueError("Failure handoff belongs to different deployed weights")
             seed = deployed["seed"] if deployed["reason"] == "miss" else -1
         env_args.update(failure_driven=True,failure_seed=seed)
-        if plan.get("protocol_id") == "basic-repair-v1":
+        if plan.get("protocol_id") in ("basic-repair-v1","qualified-repair-v1"):
             env_args["basic_repair"] = True
         if plan.get("protocol_id") == "failure-driven-v1":
             env_args["max_editor_turns"] = plan["max_model_calls"]
@@ -155,8 +162,10 @@ def submit(index):
     config += "\n".join(k + " = " + (str(v).lower() if isinstance(v, bool) else json.dumps(v)) for k, v in env_args.items()) + "\n"
     if plan.get("protocol_id") == "failure-driven-v1":
         config += f'\n[eval.env_args.agent]\nmax_turns = {plan["max_model_calls"]}\nmax_output_tokens = {plan["max_output_tokens"]}\n'
-    elif plan.get("protocol_id") in ("failure-driven-v2","basic-repair-v1"):
+    elif plan.get("protocol_id") in ("failure-driven-v2","basic-repair-v1","qualified-repair-v1"):
         config += '\n[eval.env_args.taskset.task]\nprepared_tools = true\n'
+        if plan.get("protocol_id") == "qualified-repair-v1":
+            config += 'qualified_proposals = true\n'
         # v1 AgentConfig defaults to None: omitting these is genuinely unlimited,
         # rather than a large disguised limit. Runtime service timeouts still apply.
         config += '\n[eval.env_args.agent.harness]\nid = "null"\n'
@@ -193,10 +202,66 @@ def check_comparison(report, count, start):
         raise ValueError("Verifier summary disagrees with recorded returns")
 
 
+def check_first_qualification(trace, receipt, final_tool):
+    """Audit ordered proposal receipts; a practice pass must be the terminal edit."""
+    pending, seen = {}, set()
+    committed = False
+    valid_proposals = 0
+    for node in trace["nodes"]:
+        message = node["message"]
+        role = message["role"]
+        if committed and role in ("assistant","tool"):
+            raise ValueError("Editor continued after the first qualifying proposal")
+        if role == "assistant":
+            for tool in message.get("tool_calls") or []:
+                if tool["name"] not in ("repair_inspect_policy","repair_propose_edits"):
+                    raise ValueError("Unexpected tool in qualified editor trace")
+                if tool["id"] in seen:
+                    raise ValueError("Repeated tool call identity")
+                seen.add(tool["id"])
+                pending[tool["id"]] = tool
+        if role != "tool":
+            continue
+        tool = pending.pop(message["tool_call_id"],None)
+        if tool is None or message.get("name") != tool["name"]:
+            raise ValueError("Tool result does not match a preceding request")
+        if tool["name"] != "repair_propose_edits":
+            continue
+        try:
+            result = json.loads(message["content"])
+        except (ValueError,TypeError):
+            continue  # Validation failures can be plain-text tool errors.
+        if not isinstance(result,dict) or result.get("valid") is not True:
+            continue
+        valid_proposals += 1
+        qualifies = bool(result["changed_parameters"] > 0 and result["practice_gain"] > 0.10
+                         and result["practice_gain"] > 2*result["practice_paired_standard_error"])
+        if result.get("practice_qualified") is not qualifies or result.get("submitted") is not qualifies:
+            raise ValueError("Practice qualification and submission receipt disagree")
+        if result.get("valid_proposal_number") != valid_proposals:
+            raise ValueError("Proposal receipt sequence disagrees with trace")
+        if qualifies:
+            if tool["id"] != final_tool["id"] or result.get("submission_sha256") != receipt["sha256"]:
+                raise ValueError("The first qualifying proposal was not the frozen final edit")
+            committed = True
+    # VF may stop when shared state commits, before the final tool response is
+    # appended. The trusted state receipt and independently reproduced practice
+    # check still prove that exact final proposal qualified. Earlier results must
+    # all be present, nonqualifying, and counted; never infer a receipt from args.
+    if not committed and set(pending) == {final_tool["id"]}:
+        if receipt.get("valid_proposal_number") != valid_proposals+1:
+            raise ValueError("Terminal state receipt disagrees with earlier proposal count")
+        return False
+    if not committed or pending or receipt.get("valid_proposal_number") != valid_proposals:
+        raise ValueError("Missing final qualification receipt or unfinished tool request")
+    return True
+
+
 def validate_trace(trace, summary, submission, plan, baseline, index):
-    basic = plan.get("protocol_id") == "basic-repair-v1"
-    failure_driven = plan.get("protocol_id") in ("failure-driven-v1","failure-driven-v2","basic-repair-v1")
-    prepared = plan.get("protocol_id") in ("failure-driven-v2","basic-repair-v1")
+    qualified = plan.get("protocol_id") == "qualified-repair-v1"
+    basic = plan.get("protocol_id") in ("basic-repair-v1","qualified-repair-v1")
+    failure_driven = plan.get("protocol_id") in ("failure-driven-v1","failure-driven-v2","basic-repair-v1","qualified-repair-v1")
+    prepared = plan.get("protocol_id") in ("failure-driven-v2","basic-repair-v1","qualified-repair-v1")
     if trace["run"]["id"] != submission["evaluation_id"] or summary["environment_id"] != plan["environment"]:
         raise ValueError("Trace belongs to a different run or environment")
     if not trace.get("ok") or not trace.get("is_completed") or trace.get("is_timeout") or trace.get("errors"):
@@ -256,14 +321,19 @@ def validate_trace(trace, summary, submission, plan, baseline, index):
     report = trace["info"]["repair_pipeline"]
     if prepared:
         if trace.get("stop_condition") != "edit_submitted" or not trace["info"].get("editor_setup",{}).get("ready"):
-            raise ValueError("Prepared editor did not finish with its explicit submission tool")
+            raise ValueError("Prepared editor did not finish with a committed edit")
         final_tools = replies[-1].get("tool_calls") or []
-        if len(final_tools) != 1 or final_tools[0].get("name") != "repair_submit_edits":
-            raise ValueError("Final action must be exactly one repair_submit_edits call")
+        final_action = "repair_propose_edits" if qualified else "repair_submit_edits"
+        if plan.get("final_action",final_action) != final_action:
+            raise ValueError("Frozen final action disagrees with protocol")
+        if len(final_tools) != 1 or final_tools[0].get("name") != final_action:
+            raise ValueError("Final action must be exactly one " + final_action + " call")
         response = final_tools[0]["arguments"]
         submission_record = report.get("submission",{})
-        if submission_record.get("source") != "repair_submit_edits" or json.loads(response) != json.loads(submission_record["json"]) or hashlib.sha256(submission_record["json"].encode()).hexdigest() != submission_record["sha256"]:
+        if submission_record.get("source") != final_action or json.loads(response) != json.loads(submission_record["json"]) or hashlib.sha256(submission_record["json"].encode()).hexdigest() != submission_record["sha256"]:
             raise ValueError("Final edit differs from the tool's committed submission")
+        if qualified:
+            check_first_qualification(trace,submission_record,final_tools[0])
         if report.get("protocol") != plan["protocol_id"]:
             raise ValueError("Wrong prepared-editor verifier protocol")
         if basic and report.get("target_replay_required") is not False:
@@ -308,7 +378,11 @@ def validate_trace(trace, summary, submission, plan, baseline, index):
         if payload != report["edits"] or fingerprint(candidate) != report["candidate_hash"]:
             raise ValueError("Candidate identity mismatch")
         changed = sum(int(np.count_nonzero(candidate.weights[k] != baseline.weights[k])) for k in SHAPES)
-        check_comparison(report["gate"],512,(3060000 if basic else (2060000 if prepared else (1060000 if failure_driven else 60000)))+512*index)
+        if qualified:
+            check_comparison(report["practice_qualification"],32,4040000)
+            if not passes_gate(report["practice_qualification"],changed):
+                raise ValueError("Submitted edit did not pass the frozen practice qualification rule")
+        check_comparison(report["gate"],512,(4060000 if qualified else (3060000 if basic else (2060000 if prepared else (1060000 if failure_driven else 60000))))+512*index)
         accepted = passes_gate(report["gate"],changed)
         if failure_driven:
             replay = report["candidate_replay"]
@@ -328,7 +402,7 @@ def validate_trace(trace, summary, submission, plan, baseline, index):
     if bool(data["final_round"]) != (index == plan["rounds"]-1):
         raise ValueError("Unexpected final-audit scheduling")
     if index == plan["rounds"]-1:
-        check_comparison(report["final_audit"],1024,3090000 if basic else (2090000 if prepared else (1090000 if failure_driven else 90000)))
+        check_comparison(report["final_audit"],1024,4090000 if qualified else (3090000 if basic else (2090000 if prepared else (1090000 if failure_driven else 90000))))
     elif "final_audit" in report:
         raise ValueError("Final audit was revealed before the last round")
     editor = {"trace_id":trace["id"], "evaluation_id":submission["evaluation_id"], "model":call["model"],
@@ -340,6 +414,7 @@ def validate_trace(trace, summary, submission, plan, baseline, index):
         editor["setup"] = trace["info"]["editor_setup"]
         editor["submission_receipt"] = report["submission"]
         editor["recovered_provider_requests"] = len(recovered_requests)
+        editor["submission_mode"] = "first_practice_qualified_proposal" if qualified else "explicit_final_submission"
     if exhausted:
         # Surface actual tool errors to the next attempt, without exporting raw
         # tool logs or changing the environment, seeds, or budget mid-experiment.
@@ -482,7 +557,7 @@ def publish_model(force=False):
                                    "environment":plan["environment"],"policy_hash":fingerprint(policy)})
     shutil.copy2(ROOT / "deployment/inference.py", folder / "inference.py")
     shutil.copy2(ROOT / "LICENSE", folder / "LICENSE")
-    for name in ("PREPARED_EDITOR.md","FAILURE_DRIVEN.md","LANGUAGE_EXTENSION.md","BASIC_REPAIR.md"):
+    for name in ("PREPARED_EDITOR.md","FAILURE_DRIVEN.md","LANGUAGE_EXTENSION.md","BASIC_REPAIR.md","QUALIFIED_REPAIR.md"):
         shutil.copy2(ROOT / name, folder / name)
     audit = folder / "experiment"
     audit.mkdir(exist_ok=True)
@@ -511,7 +586,9 @@ def publish_model(force=False):
         card += f"**Hosted attempt stopped: {failure['outcome']}.** It recorded {failure.get('activity',{}).get('model_turns',0)} model turns, {failure['valid_practice_results']} valid practice results, and {failure['final_submission_calls']} final submission calls. No weights were promoted from this failed attempt. Practice results are not held-out evaluation results. [Evaluation](https://app.primeintellect.ai/dashboard/evaluations/{failure['evaluation_id']}) · [Failure audit](experiment/failed-attempts/{failure['evaluation_id']}.json).\n\n"
     card += "The editor and all experiment game evaluations run on Prime. The simulation runs on Hugging Face CPU. A lightweight controller serializes and publishes verified weights. This iterative feedback protocol is separate from the earlier one-shot experiment.\n\n"
     card += "\n".join(rows) + "\n\nEach valid candidate is tested on 512 fresh matched seeds, so means in different rows are not directly comparable. Attempts without a valid submission receive no candidate evaluation. Rejected attempts remain in the audit; the root checkpoint always contains the incumbent.\n\n"
-    if plan.get("protocol_id") == "basic-repair-v1":
+    if plan.get("protocol_id") == "qualified-repair-v1":
+        card += "The LLM proposes raw weight edits using prepared tools. The FIRST proposal with an actual weight change, mean practice gain >0.10, and gain >2 paired standard errors across 32 practice games is automatically frozen and submitted. This ends editing without a separate final-submission decision. Only a separate 512-game promotion gate can replace the published weights; qualification alone cannot. A final 1,024-game audit is never used to select edits. There is no editor-turn cap; the service timeout is 60 minutes. This is one repair of a planted fault, not evidence of sustained recursive improvement. [Exact protocol](QUALIFIED_REPAIR.md).\n\n"
+    elif plan.get("protocol_id") == "basic-repair-v1":
         card += "This is one tool-assisted repair of a deliberately damaged teaching policy. The editor can inspect and test proposals without a turn limit, then must explicitly submit its edit. Acceptance requires broad improvement on 512 separate games. The recorded-miss replay is diagnostic only; it is NOT a promotion requirement. The final 1,024-game audit is separate. This trial does not demonstrate unknown-failure repair or sustained recursive improvement. Temperature is 0.6; each response allows 16,384 tokens and the hosted service timeout is 60 minutes.\n\n"
     elif plan.get("protocol_id") == "failure-driven-v2":
         card += "This run uses prepared inspection and practice tools with no model-turn, tool-call, or total-output-token limit. Its final action is the explicit submit_edits tool. Each response has a 16,384-token allowance and hosted jobs retain a 60-minute service timeout. Acceptance requires both catching the recorded miss and broader improvement.\n\n"
@@ -612,7 +689,7 @@ def publish_space():
     folder.mkdir(exist_ok=True)
     for source, target in [("pipeline/space_app.py","app.py"),("weight_space_breakout/game.py","game.py"),("deployment/inference.py","inference.py"),("LICENSE","LICENSE")]:
         shutil.copy2(ROOT / source, folder / target)
-    for name in ("PREPARED_EDITOR.md","FAILURE_DRIVEN.md","LANGUAGE_EXTENSION.md","BASIC_REPAIR.md"):
+    for name in ("PREPARED_EDITOR.md","FAILURE_DRIVEN.md","LANGUAGE_EXTENSION.md","BASIC_REPAIR.md","QUALIFIED_REPAIR.md"):
         shutil.copy2(ROOT / name, folder / name)
     app = folder / "app.py"
     app.write_text(app.read_text(encoding="utf-8").replace('MODEL_ID = "HarleyCooper/weight-space-breakout-iterative"', 'MODEL_ID = '+json.dumps(MODEL_ID)), encoding="utf-8")
