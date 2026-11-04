@@ -1,5 +1,8 @@
 # Weight Space Breakout: hosted repair pipeline
 
+Optional [Weights & Biases tracking](TRACKING.md) publishes saved practice, gate,
+audit, acceptance, execution, and deployment evidence without rerunning inference.
+
 **Version 0.4.5 adds [automatic submission of the first qualifying edit](QUALIFIED_REPAIR.md).**
 The LLM proposes weight assignments using tools. The first proposal that passes the
 predefined 32-game practice check ends editing automatically; a separate 512-game

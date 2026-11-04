@@ -54,8 +54,11 @@ def status_text():
     text = f"### Current published policy\n\n**{manifest['label']}** · {len(manifest['history'])} completed repair rounds.\n\n"
     text += "\n".join(rows) if manifest["history"] else "The deliberately faulty starting policy is published. No repair has been promoted yet."
     for failure in manifest.get("execution_failures", []):
-        text += f"\n\n**Hosted attempt stopped: {failure['outcome']}.** {failure.get('activity',{}).get('model_turns',0)} model turns; {failure['valid_practice_results']} valid practice results; {failure['final_submission_calls']} final submissions. No weights were promoted from this failed attempt. [View evaluation](https://app.primeintellect.ai/dashboard/evaluations/{failure['evaluation_id']})."
+        detail = "Prime has not supplied a trace; performance measurements are unavailable." if failure.get("trace_available") is False else f"{failure.get('activity',{}).get('model_turns',0)} model turns; {failure['valid_practice_results']} valid practice results; {failure['final_submission_calls']} final submissions."
+        text += f"\n\n**Hosted attempt stopped: {failure['outcome']}.** {detail} No weights were promoted from this failed attempt. [View evaluation](https://app.primeintellect.ai/dashboard/evaluations/{failure['evaluation_id']})."
     text += f"\n\n[View model and full audit](https://huggingface.co/{MODEL_ID}) · [Pipeline source](https://github.com/HarleyCoops/weight-space-breakout-pipeline)\n\nCurrent model revision: `{revision}`"
+    if manifest.get("wandb_project_url"):
+        text += f"\n\n[Weights & Biases experiment records]({manifest['wandb_project_url']})"
     if manifest.get("run_plan",{}).get("protocol_id") == "qualified-repair-v1":
         text += "\n\nProtocol: the LLM proposes weight edits using prepared tools. The first edit that passes the 32-game practice check is frozen automatically, ending editing. A separate 512-game verifier can still reject it; only accepted weights replace the published policy. There is no editor-turn cap. This tests one planted-fault repair. Playing here uses the published weights and never launches an editor job."
     elif manifest.get("run_plan",{}).get("protocol_id") == "basic-repair-v1":

@@ -499,14 +499,23 @@ def archive_failure(index, status):
     save(folder / "hosted-status.json", status)
     summaries = json_output(prime(["traces","list","--run-id",status["evaluation_id"],"--output","json","--plain"]))
     save(folder / "trace-list.json", summaries)
-    if len(summaries.get("items", [])) != 1:
-        raise RuntimeError("Failure status saved; full trace is not available yet. Resume later to archive it.")
-    summary = summaries["items"][0]
-    trace = json_output(prime(["traces","get",summary["trace_id"],"--raw","--output","json","--plain"]))
-    save(folder / "trace-summary.json", summary)
-    save(folder / "trace.json", trace)
+    items = summaries.get("items", [])
+    if len(items) > 1 or summaries.get("next_cursor"):
+        raise ValueError("Unexpected multiple traces in a single-attempt run")
+    if items:
+        summary = items[0]
+        trace = json_output(prime(["traces","get",summary["trace_id"],"--raw","--output","json","--plain"]))
+        save(folder / "trace-summary.json", summary)
+        save(folder / "trace.json", trace)
+        report = summarize_failure(trace,summary,status,index)
+    else:
+        report = {"round":index,"evaluation_id":status["evaluation_id"],"trace_id":None,
+                  "status":status["status"],"environment":initialize()["environment"],
+                  "outcome":"service_failure_without_trace","errors":[{"message":status.get("error_message")}],
+                  "activity":{},"valid_practice_results":None,"final_submission_calls":None,
+                  "independent_verifier_completed":None,"trace_available":False,"promoted":False,
+                  "note":"No trace was available from Prime. Missing performance measurements are not zero scores. No weights promoted; preserve this attempt before any retry."}
     (folder / "hosted-log.txt").write_text(prime(["eval","logs",status["evaluation_id"],"--tail","200","--plain"]),encoding="utf-8")
-    report = summarize_failure(trace,summary,status,index)
     save(folder / "execution-failure.json", report)
     state = read(RUN / "state.json")
     failures = state.setdefault("execution_failures", [])
@@ -552,12 +561,14 @@ def publish_model(force=False):
         manifest["setup_failures"] = state["setup_failures"]
     if state.get("execution_failures"):
         manifest["execution_failures"] = state["execution_failures"]
+    if (RUN / "wandb-sync.json").exists():
+        manifest["wandb_project_url"] = read(RUN / "wandb-sync.json")["project_url"]
     save(folder / "manifest.json", manifest)
     save(folder / "config.json", {"architecture":"tanh_mlp","dimensions":[500,32,32,5],"parameters":17253,
                                    "environment":plan["environment"],"policy_hash":fingerprint(policy)})
     shutil.copy2(ROOT / "deployment/inference.py", folder / "inference.py")
     shutil.copy2(ROOT / "LICENSE", folder / "LICENSE")
-    for name in ("PREPARED_EDITOR.md","FAILURE_DRIVEN.md","LANGUAGE_EXTENSION.md","BASIC_REPAIR.md","QUALIFIED_REPAIR.md"):
+    for name in ("PREPARED_EDITOR.md","FAILURE_DRIVEN.md","LANGUAGE_EXTENSION.md","BASIC_REPAIR.md","QUALIFIED_REPAIR.md","TRACKING.md"):
         shutil.copy2(ROOT / name, folder / name)
     audit = folder / "experiment"
     audit.mkdir(exist_ok=True)
@@ -582,8 +593,14 @@ def publish_model(force=False):
     card = "---\nlicense: mit\ntags:\n- reinforcement-learning\n- breakout\n- weight-space-programming\n- numpy\n- safetensors\n---\n# Iterative Weight Space Breakout\n\n"
     card += f"**Current weights: {manifest['label']}.** This is a 17,253-parameter game controller, not a language model.\n\n"
     card += f"[Live simulation](https://huggingface.co/spaces/{SPACE_ID}) · [Pipeline source](https://github.com/HarleyCoops/weight-space-breakout-pipeline) · [Prime environment](https://app.primeintellect.ai/dashboard/environments/harleycooper/weight-space-breakout)\n\n"
+    if manifest.get("wandb_project_url"):
+        card += f"[Weights & Biases experiment records]({manifest['wandb_project_url']}) track practice, independent verification, selected checkpoints, and execution failures separately.\n\n"
     for failure in state.get("execution_failures", []):
-        card += f"**Hosted attempt stopped: {failure['outcome']}.** It recorded {failure.get('activity',{}).get('model_turns',0)} model turns, {failure['valid_practice_results']} valid practice results, and {failure['final_submission_calls']} final submission calls. No weights were promoted from this failed attempt. Practice results are not held-out evaluation results. [Evaluation](https://app.primeintellect.ai/dashboard/evaluations/{failure['evaluation_id']}) · [Failure audit](experiment/failed-attempts/{failure['evaluation_id']}.json).\n\n"
+        if failure.get("trace_available") is False:
+            detail = "Prime has not supplied a trace. Model turns and performance measurements are unavailable; missing results are not zero scores."
+        else:
+            detail = f"It recorded {failure.get('activity',{}).get('model_turns',0)} model turns, {failure['valid_practice_results']} valid practice results, and {failure['final_submission_calls']} final submission calls."
+        card += f"**Hosted attempt stopped: {failure['outcome']}.** {detail} No weights were promoted from this failed attempt. Practice results are not held-out evaluation results. [Evaluation](https://app.primeintellect.ai/dashboard/evaluations/{failure['evaluation_id']}) · [Failure audit](experiment/failed-attempts/{failure['evaluation_id']}.json).\n\n"
     card += "The editor and all experiment game evaluations run on Prime. The simulation runs on Hugging Face CPU. A lightweight controller serializes and publishes verified weights. This iterative feedback protocol is separate from the earlier one-shot experiment.\n\n"
     card += "\n".join(rows) + "\n\nEach valid candidate is tested on 512 fresh matched seeds, so means in different rows are not directly comparable. Attempts without a valid submission receive no candidate evaluation. Rejected attempts remain in the audit; the root checkpoint always contains the incumbent.\n\n"
     if plan.get("protocol_id") == "qualified-repair-v1":
@@ -689,7 +706,7 @@ def publish_space():
     folder.mkdir(exist_ok=True)
     for source, target in [("pipeline/space_app.py","app.py"),("weight_space_breakout/game.py","game.py"),("deployment/inference.py","inference.py"),("LICENSE","LICENSE")]:
         shutil.copy2(ROOT / source, folder / target)
-    for name in ("PREPARED_EDITOR.md","FAILURE_DRIVEN.md","LANGUAGE_EXTENSION.md","BASIC_REPAIR.md","QUALIFIED_REPAIR.md"):
+    for name in ("PREPARED_EDITOR.md","FAILURE_DRIVEN.md","LANGUAGE_EXTENSION.md","BASIC_REPAIR.md","QUALIFIED_REPAIR.md","TRACKING.md"):
         shutil.copy2(ROOT / name, folder / name)
     app = folder / "app.py"
     app.write_text(app.read_text(encoding="utf-8").replace('MODEL_ID = "HarleyCooper/weight-space-breakout-iterative"', 'MODEL_ID = '+json.dumps(MODEL_ID)), encoding="utf-8")
@@ -705,7 +722,7 @@ def publish_space():
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("command", choices=["init", "submit", "collect", "publish-model", "publish-space", "verify-deployment", "run"])
+    parser.add_argument("command", choices=["init", "submit", "collect", "publish-model", "publish-space", "verify-deployment", "run", "sync-wandb"])
     parser.add_argument("--round", type=int, default=0)
     parser.add_argument("--force", action="store_true", help="Refresh model documentation/audit without changing weights")
     args = parser.parse_args()
@@ -722,7 +739,14 @@ def main():
     elif args.command == "verify-deployment":
         verify_deployment(args.round)
     elif args.command == "run":
-        run_loop()
+        try:
+            run_loop()
+        finally:
+            from pipeline.tracking import maybe_sync
+            maybe_sync(RUN)
+    elif args.command == "sync-wandb":
+        from pipeline.tracking import sync
+        print(json.dumps(sync(RUN),indent=2))
 
 
 if __name__ == "__main__":

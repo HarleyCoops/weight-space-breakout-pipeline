@@ -6,3 +6,4 @@ dist/
 .env
 artifacts/
 .prime/
+wandb/

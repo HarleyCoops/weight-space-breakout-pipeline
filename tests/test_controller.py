@@ -37,6 +37,16 @@ def fixture():
 
 
 class ControllerTests(unittest.TestCase):
+    def test_service_failure_without_trace_is_preserved_with_missing_metrics(self):
+        with tempfile.TemporaryDirectory() as folder, patch.object(control,"RUN",Path(folder)), patch.object(control,"prime",side_effect=[json.dumps({"items":[]}),"No logs available."]):
+            control.initialize()
+            (Path(folder)/"round-00").mkdir()
+            report=control.archive_failure(0,{"evaluation_id":"startup-failed","status":"FAILED","error_message":"Rate exceeded."})
+            self.assertFalse(report["trace_available"])
+            self.assertIsNone(report["valid_practice_results"])
+            self.assertFalse(report["promoted"])
+            self.assertEqual(control.read(Path(folder)/"state.json")["completed_rounds"],0)
+
     def test_submission_and_trace_use_frozen_temperature(self):
         with tempfile.TemporaryDirectory() as folder, patch.object(control,"RUN",Path(folder)), patch.object(control,"prime",return_value="Evaluation ID: sampling-test"):
             plan=control.initialize()
