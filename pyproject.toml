@@ -22,4 +22,4 @@ build-backend = "hatchling.build"
 packages = ["weight_space_breakout"]
 
 [tool.hatch.build.targets.sdist]
-include = ["weight_space_breakout", "tests", "pipeline", "deployment", "README.md", "ONE_SHOT.md", "PIPELINE.md", "FAILURE_DRIVEN.md", "PREPARED_EDITOR.md", "BASIC_REPAIR.md", "QUALIFIED_REPAIR.md", "LANGUAGE_EXTENSION.md", "LICENSE", "pyproject.toml"]
+include = ["weight_space_breakout", "tests", "pipeline", "deployment", "README.md", "ONE_SHOT.md", "PIPELINE.md", "FAILURE_DRIVEN.md", "PREPARED_EDITOR.md", "BASIC_REPAIR.md", "QUALIFIED_REPAIR.md", "TRACKING.md", "LANGUAGE_EXTENSION.md", "LICENSE", "pyproject.toml"]
