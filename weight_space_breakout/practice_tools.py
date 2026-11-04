@@ -57,11 +57,15 @@ class PracticeSession:
         rank = (True if self.basic else replay["prevented_recorded_miss"],mean)
         if self.best is None or rank > (True if self.basic else self.best["prevented_recorded_miss"],self.best["candidate_mean"]):
             self.best = {"edits":edits,"prevented_recorded_miss":replay["prevented_recorded_miss"],"candidate_mean":mean}
-        return {"practice_only": True, "valid":True, "target_replay": replay,
+        return {"practice_only": True, "valid":True,
+                "target_replay_required":not self.basic,
+                "objective": "Improve broad game performance; target replay is diagnostic only" if self.basic else "Prevent the recorded miss and improve broad game performance",
+                "target_replay": replay,
                 "practice_games": len(self.seeds), "baseline_mean": float(np.mean(self.before)),
                 "candidate_mean": mean, "practice_gain": float(np.mean(np.asarray(after)-self.before)),
                 "repeated_patch":repeated,
-                "next_step": ("This exact patch was already tested; repeating it gives no new evidence. Change the hypothesis or submit your best valid tested patch. " if repeated else "")+
+                "next_step": ("You do not need to rescue the recorded miss in this basic trial. Focus on broad improvement and submit your best tested proposal. " if self.basic else "")+
+                             ("This exact patch was already tested; repeating it gives no new evidence. Change the hypothesis or submit your best valid tested patch. " if repeated else "")+
                              "When ready, call submit_edits with your diagnosis, expected_prevention, and final assignments. inspect_policy can recover your best practice patch. A final submission is required even if you remain uncertain; independent verification can reject it."}
 
     def submission(self, diagnosis, expected_prevention, edits):

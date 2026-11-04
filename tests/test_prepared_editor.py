@@ -16,6 +16,14 @@ from weight_space_breakout.practice_tools import PracticeSession
 
 
 class PracticeTests(unittest.TestCase):
+    def test_basic_feedback_keeps_replay_diagnostic(self):
+        base=faulty_policy("reversed_controls")
+        lab=PracticeSession(json.dumps(base.sparse()),failure_case(base,314159),"basic-repair-v1")
+        result=lab.test(repair_edits("reversed_controls")["edits"])
+        self.assertFalse(result["target_replay_required"])
+        self.assertIn("diagnostic only",result["objective"])
+        self.assertEqual(lab.seeds,tuple(range(3040000,3040032)))
+
     def test_invalid_and_repeated_patch_feedback(self):
         base=faulty_policy("reversed_controls")
         lab=PracticeSession(json.dumps(base.sparse()),failure_case(base,314159))

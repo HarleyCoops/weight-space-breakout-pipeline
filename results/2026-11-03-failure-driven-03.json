@@ -1,0 +1,42 @@
+{
+  "round": 0,
+  "evaluation_id": "lk99r3xguflswv6pmw9ojz9p",
+  "trace_id": "96275570a14c4085bd0ec2c06a4824f5",
+  "status": "FAILED",
+  "environment": "harleycooper/weight-space-breakout@0.4.3",
+  "outcome": "provider_error",
+  "errors": [
+    {
+      "type": "ProviderError",
+      "message": "upstream 429: {\"error\":{\"message\":\"Too many concurrent hosted model requests. Try again shortly.\",\"type\":\"rate_limit_exceeded\",\"param\":null,\"code\":\"rate_limited\"},\"request_id\":\"a54f9b4be8f45b5e-NRT\",\"inference_id\":\"req_f7462d7a6017407cad3d7d7be331008f\"}",
+      "status_code": 429
+    }
+  ],
+  "activity": {
+    "total_entries": 288,
+    "user_messages": 1,
+    "model_turns": 144,
+    "model_calls": 150,
+    "tool_calls": 144,
+    "tool_results": 143,
+    "steps_per_branch": [
+      288
+    ]
+  },
+  "tool_counts": {
+    "repair_inspect_policy": 1,
+    "repair_test_edits": 143
+  },
+  "valid_practice_results": 141,
+  "practice_input_errors": {
+    "Out-of-bounds index [0] for W2, shape (32, 32); valid indices are zero-based. Correct this entry before retrying.": 1
+  },
+  "target_preventions_in_practice": 0,
+  "best_practice_mean": 2.59375,
+  "unique_practice_requests": 27,
+  "largest_identical_request_count": 18,
+  "final_submission_calls": 0,
+  "independent_verifier_completed": false,
+  "promoted": false,
+  "note": "Execution failure: no promotion. Practice results are diagnostic only and are not held-out evaluation results."
+}

@@ -76,3 +76,15 @@ null-space results from a denser trained policy cannot be assumed to transfer.
 No Breakout result here demonstrates improvement of Cree or Dakota language models.
 
 See [the separately specified basic trial](../BASIC_REPAIR.md).
+
+## Follow-up after the review
+
+Run 03 subsequently ended with a provider HTTP 429 concurrency-limit error after
+144 model turns and 150 model calls including retries. It produced 141 valid
+practice measurements, one input-index error, no target rescues, and no final
+submission. Its best practice mean was 2.59375; that was never independently
+verified or promoted. The full trace and failure audit remain attached to the run.
+
+The reviewer also checked the basic-repair implementation at commit `632415f` and
+found no blocking acceptance, seed, receipt, or publication mismatch. The follow-up
+change explicitly labels target replay as diagnostic in every basic practice reply.

@@ -3,10 +3,15 @@
 **Version 0.4.4 adds a separately specified [basic tool-assisted repair trial](BASIC_REPAIR.md).**
 It tests one broad improvement and the complete deployment path. The example miss is
 diagnostic only in this new protocol; prior failure-driven trials keep their stricter
-rules. The new workflow passes 43 tests, including both protocols through the real
+rules. The new workflow passes 44 tests, including both protocols through the real
 agent, tool transport, final submission, and verifier with a scripted test provider.
 A passing software test is not a real hosted LLM result.
 See the [independent design review](reviews/2026-11-03-independent-review.md).
+
+The subsequent 0.4.3 attempt completed 141 valid practice tests but never submitted
+an edit in 144 turns. It stopped on a provider HTTP 429 concurrency-limit error.
+No independent promotion check ran and no weights were promoted. This separates
+working practice tools from the still-unproven hosted-editor submission milestone.
 
 **Version 0.4.3:** [prepared practice tools and a final submission action](PREPARED_EDITOR.md),
 with no editor-turn limit. Startup prepares the numerical tools, and the last action
