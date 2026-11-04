@@ -146,3 +146,12 @@ by Rikiya Takehi, Jayden Teoh, Alex Zhang, and Omar Khattab (MIT CSAIL, November
 The original experiment identifies a game from its weights. We reconstructed our own
 game and tested repairs to intentionally faulty handwritten weights. This is not an
 exact reproduction of their simulator, PPO training, or reported scores.
+
+## Completed repair and evidence reconciliation — 2026-11-03
+
+The completed qualified repair ran on HF Jobs CPU using Prime Inference for Qwen.
+It changed three policy parameters, improving sampled audit mean 1.2803 → 4.0479,
+with 671 wins, 243 losses, and 110 ties. The diagnostic miss was not prevented.
+A posthoc local greedy check on the same seeds regresses 10.2471 → 1.5674.
+Earlier provider failures remain execution failures with missing measurements.
+[Canonical status](https://github.com/HarleyCoops/FailureIsAllYouNeed/blob/codex/initial-results/docs/STATUS_2026-11-03.md) · [Dataset](https://huggingface.co/datasets/HarleyCooper/failure-is-all-you-need-evaluations) · [Reconciliation](https://github.com/HarleyCoops/FailureIsAllYouNeed/blob/codex/initial-results/docs/CROSS_REPO_RECONCILIATION.md).
