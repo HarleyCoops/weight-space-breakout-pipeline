@@ -59,6 +59,10 @@ def status_text():
     text += f"\n\n[View model and full audit](https://huggingface.co/{MODEL_ID}) · [Pipeline source](https://github.com/HarleyCoops/weight-space-breakout-pipeline)\n\nCurrent model revision: `{revision}`"
     if manifest.get("wandb_project_url"):
         text += f"\n\n[Weights & Biases experiment records]({manifest['wandb_project_url']})"
+    if manifest.get("run_plan",{}).get("compute_platform") == "huggingface-jobs":
+        text += "\n\nExecution: Qwen used Prime Inference; practice games, the independent verifier, and the final audit ran on Hugging Face Jobs CPU with the released environment code."
+        if manifest['run_plan'].get('job_url'):
+            text += f" [View completed job]({manifest['run_plan']['job_url']})."
     if manifest.get("run_plan",{}).get("protocol_id") == "qualified-repair-v1":
         text += "\n\nProtocol: the LLM proposes weight edits using prepared tools. The first edit that passes the 32-game practice check is frozen automatically, ending editing. A separate 512-game verifier can still reject it; only accepted weights replace the published policy. There is no editor-turn cap. This tests one planted-fault repair. Playing here uses the published weights and never launches an editor job."
     elif manifest.get("run_plan",{}).get("protocol_id") == "basic-repair-v1":
@@ -127,7 +131,7 @@ def fresh():
 with gr.Blocks(title="Breakout · Hosted Weight Repair Loop", delete_cache=(3600,3600)) as demo:
     gr.Markdown("""# Breakout: Hosted Weight Repair Loop
 
-**Faulty weights → Prime-hosted games and verifier → Qwen edit → fresh evaluation →
+**Faulty weights → hosted games and verifier → Qwen edit → fresh evaluation →
 accepted weights on Hugging Face → next simulation.**
 
 Every attempt is recorded, and edits that fail the improvement gate are rejected.

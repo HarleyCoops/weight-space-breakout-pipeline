@@ -601,7 +601,12 @@ def publish_model(force=False):
         else:
             detail = f"It recorded {failure.get('activity',{}).get('model_turns',0)} model turns, {failure['valid_practice_results']} valid practice results, and {failure['final_submission_calls']} final submission calls."
         card += f"**Hosted attempt stopped: {failure['outcome']}.** {detail} No weights were promoted from this failed attempt. Practice results are not held-out evaluation results. [Evaluation](https://app.primeintellect.ai/dashboard/evaluations/{failure['evaluation_id']}) · [Failure audit](experiment/failed-attempts/{failure['evaluation_id']}.json).\n\n"
-    card += "The editor and all experiment game evaluations run on Prime. The simulation runs on Hugging Face CPU. A lightweight controller serializes and publishes verified weights. This iterative feedback protocol is separate from the earlier one-shot experiment.\n\n"
+    if plan.get("compute_platform") == "huggingface-jobs":
+        card += "Qwen inference ran through Prime Inference. The existing environment, practice tools, independent verifier, and final audit ran on Hugging Face Jobs CPU using the released 0.4.5 task code. This was not a Prime-hosted evaluation. The live simulation also runs on Hugging Face CPU.\n\n"
+        if plan.get("job_url"):
+            card += f"[Completed HF Job]({plan['job_url']}) · [Full execution evidence](experiment/hf-job/).\n\n"
+    else:
+        card += "The editor and all experiment game evaluations run on Prime. The simulation runs on Hugging Face CPU. A lightweight controller serializes and publishes verified weights. This iterative feedback protocol is separate from the earlier one-shot experiment.\n\n"
     card += "\n".join(rows) + "\n\nEach valid candidate is tested on 512 fresh matched seeds, so means in different rows are not directly comparable. Attempts without a valid submission receive no candidate evaluation. Rejected attempts remain in the audit; the root checkpoint always contains the incumbent.\n\n"
     if plan.get("protocol_id") == "qualified-repair-v1":
         card += "The LLM proposes raw weight edits using prepared tools. The FIRST proposal with an actual weight change, mean practice gain >0.10, and gain >2 paired standard errors across 32 practice games is automatically frozen and submitted. This ends editing without a separate final-submission decision. Only a separate 512-game promotion gate can replace the published weights; qualification alone cannot. A final 1,024-game audit is never used to select edits. There is no editor-turn cap; the service timeout is 60 minutes. This is one repair of a planted fault, not evidence of sustained recursive improvement. [Exact protocol](QUALIFIED_REPAIR.md).\n\n"
@@ -614,12 +619,20 @@ def publish_model(force=False):
     if state.get("final_audit"):
         a = state["final_audit"]
         card += f"## Final audit\n\nOn {a['episodes']} separate seeds, initial faulty return **{a['baseline_return']:.4f}** and final selected return **{a['candidate_return']:.4f}**; paired gain **{a['gain']:+.4f}**, paired standard error **{a['paired_standard_error']:.4f}**. This final audit was not fed to the editor or used to select a policy.\n\n"
+        if plan.get("compute_platform") == "huggingface-jobs":
+            differences = np.asarray(a['candidate_returns'])-np.asarray(a['baseline_returns'])
+            card += f"The paired games include **{int(np.sum(differences>0))} improvements, {int(np.sum(differences<0))} regressions, and {int(np.sum(differences==0))} ties**. Acceptance means improved average return under the frozen gate; it does not guarantee improvement on every game.\n\n"
+            if last_accepted is not None:
+                card += f"The accepted candidate changed **{state['history'][last_accepted-1]['feedback']['changed_parameters']} of 17,253 parameters**. It was proposed by Qwen through the practice tools and validated against its exact tool-call arguments before export.\n\n"
         if last_accepted is None:
             card += "No edit was promoted in this bounded run. The published weights remain the initial faulty policy; this run does not demonstrate a policy improvement.\n\n"
         if fingerprint(policy) == fingerprint(tracking_policy()):
             card += "The selected policy exactly matches the intact handwritten reference controller. This demonstrates restoration of the teaching policy; it does not establish sustained recursive improvement or a new learned skill.\n\n"
     card += "## Files\n\n`model.safetensors`, `policy.npz`, and `policy.json` contain the selected policy. `initial_baseline.safetensors` preserves the known-bad start. `manifest.json` links its fingerprint, file checksum, plan, and round decisions. `experiment/` preserves candidates and verifier reports. Every Hub commit is an immutable version; the demo resolves a revision before downloading and checks both hashes.\n\n"
-    card += (ROOT / "PIPELINE.md").read_text(encoding="utf-8")
+    if plan.get("compute_platform") == "huggingface-jobs":
+        card += "## Attribution and scope\n\nThis is an independent replication attempt inspired by [Rikiya Takehi's weight-space programming experiment](https://rikiyat.github.io/blog/weight-space-programming/), its [original logs](https://github.com/RikiyaT/lm_understand-logs/tree/main/exp1_which_game), and [announcement](https://x.com/rikiyatakehi/status/2117313742891327994). Our grid game, handwritten teaching policy, and tool-assisted repair protocol differ from the original experiment. The editor LLM's own weights are unchanged.\n"
+    else:
+        card += (ROOT / "PIPELINE.md").read_text(encoding="utf-8")
     (folder / "README.md").write_text(card, encoding="utf-8")
     commit = api.upload_folder(repo_id=MODEL_ID, folder_path=folder, parent_commit=head,
                                commit_message=f"Publish verified pipeline state after {state['completed_rounds']} rounds",
@@ -655,7 +668,7 @@ def verify_deployment(index):
     if deployed["actions"] != [f["action"] for f in expected["frames"][1:]]:
         raise ValueError("Space actions differ from hosted verifier")
     deployed.update(verified=True,checked_at=dt.datetime.now(dt.timezone.utc).isoformat(),
-                    comparison="Exact seed, actions, return, termination, and policy hash match Prime verifier")
+                    comparison="Exact seed, actions, return, termination, and policy hash match the hosted verifier")
     save(folder / "deployment-check.json",deployed)
     print(f"Verified HF simulation round {index+1}: {publication['revision']}",flush=True)
     return deployed

@@ -100,7 +100,8 @@ def sync(folder, entity=None, project=None):
                     run.summary["metrics_logged"]=True
                 run.summary.update(item["metrics"])
                 run.summary.update({"data_sha256":item["data_sha256"],"selected_policy_hash":item["selected_hash"],
-                    "prime_url":"https://app.primeintellect.ai/dashboard/evaluations/"+item["evaluation_id"],
+                    "prime_url":None if plan.get("compute_platform")=="huggingface-jobs" else "https://app.primeintellect.ai/dashboard/evaluations/"+item["evaluation_id"],
+                    "execution_url":plan.get("job_url") or "https://app.primeintellect.ai/dashboard/evaluations/"+item["evaluation_id"],
                     "hf_model_url":"https://huggingface.co/"+plan["model_repo"],
                     "hf_revision":item["publication"].get("revision"),
                     "interpretation":"Practice is exploratory. Gate controls promotion. Audit never selects edits. Execution failures have no policy-performance score."})
