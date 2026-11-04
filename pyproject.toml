@@ -1,14 +1,14 @@
 [project]
 name = "weight-space-breakout"
-version = "0.4.2"
+version = "0.4.3"
 description = "An independent grid Breakout simulator and weight-repair benchmark"
 requires-python = ">=3.11"
-dependencies = ["numpy==2.4.1", "verifiers==0.4.0; sys_platform != 'win32'"]
+dependencies = ["numpy==2.4.1", "verifiers==0.4.1.dev97; sys_platform != 'win32'"]
 readme = "README.md"
 license = "MIT"
 
 [project.optional-dependencies]
-prime = ["verifiers==0.4.0"]
+prime = ["verifiers==0.4.1.dev97"]
 export = ["huggingface-hub>=0.26", "safetensors>=0.4"]
 
 [project.scripts]

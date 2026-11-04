@@ -5,7 +5,7 @@ Prime-hosted Qwen and Prime-hosted games, then publishes to Hugging Face CPU Bas
 The process running the controller needs no GPU. It does need network access,
 authenticated Prime CLI, and Hugging Face repository write permission.
 
-Fresh plans use `failure-driven-v2` from environment 0.4.2. The editor diagnoses an
+Fresh plans use `failure-driven-v2` from environment 0.4.3. The editor diagnoses an
 observed failure with prepared inspection and practice tools. There is no model-turn,
 tool-call, or total-output-token limit; its final action explicitly submits the edit.
 Acceptance requires both preventing that miss and broader improvement.

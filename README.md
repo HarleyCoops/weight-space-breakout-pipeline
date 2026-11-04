@@ -1,6 +1,6 @@
 # Weight Space Breakout: hosted repair pipeline
 
-**New in 0.4.2:** [prepared practice tools and a final submission action](PREPARED_EDITOR.md),
+**Current version 0.4.3:** [prepared practice tools and a final submission action](PREPARED_EDITOR.md),
 with no editor-turn limit. Startup prepares the numerical tools, and the last action
 commits the proposed weight edit for independent verification. Tool calling is enabled.
 
@@ -9,6 +9,8 @@ repeated an oversized patch and eventually ended with a provider connection erro
 No weights were promoted. Version 0.4.2 improves tool constraints and repeated-patch
 feedback and preserves failed-attempt audits; its effect on editor behavior still
 requires a new hosted trial. See [the full recorded outcome](PREPARED_EDITOR.md).
+Version 0.4.3 updates the verifier dependency for the current hosted runtime;
+the 39 tests also pass against that dependency.
 
 **Previous 0.3.0 trial:** [failure-driven diagnosis and replay](FAILURE_DRIVEN.md). The next
 editor receives a specific failed episode without a supplied diagnosis, can use tools,

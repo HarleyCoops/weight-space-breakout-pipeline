@@ -1,6 +1,6 @@
 # Hosted iterative weight repair
 
-**Current extension:** version 0.4.2 implements [prepared tool-assisted repair](PREPARED_EDITOR.md)
+**Current extension:** version 0.4.3 implements [prepared tool-assisted repair](PREPARED_EDITOR.md)
 with no editor-turn cap and an explicit final submission tool. It extends the
 [failure-driven repair](FAILURE_DRIVEN.md) replay and broad-performance checks. Fresh
 controller plans use that protocol. The description below records the completed

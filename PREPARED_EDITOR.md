@@ -1,6 +1,6 @@
 # Prepared tools and an explicit final weight edit
 
-Environment 0.4.2 provides `failure-driven-v2`. Tool calling is enabled. The editor
+Environment 0.4.3 provides `failure-driven-v2`. Tool calling is enabled. The editor
 has **no model-turn limit, tool-call limit, or aggregate output-token limit**. The
 earlier no-tool proof of concept and the unsuccessful eight-turn trial retain their
 original records and checkpoints.
@@ -55,7 +55,7 @@ Practice seeds: `2040000..2040031`; fallback failure search:
 
 ## Validation
 
-All 39 tests pass on Linux, including real-server startup, preparation, practice execution,
+All 39 tests pass on Linux with `verifiers==0.4.1.dev97`, including real-server startup, preparation, practice execution,
 explicit submission, rejection after submission, and controller validation of a
 30-call trace. A scripted local provider also drives the real agent harness through
 inspection, practice, and submission: the session stops with `edit_submitted`, makes
@@ -98,6 +98,15 @@ failure is separate; these changes address the observed unproductive tool loop,
 not the upstream network. The controller now archives failed traces and publishes
 the failure status with the unchanged weights. A new hosted trial is needed to
 measure whether these feedback changes improve Qwen's behavior.
+
+Version 0.4.3 updates the verifier dependency to the hosted runtime's required
+`verifiers==0.4.1.dev97`. The first launch of run 03 on 0.4.2 was rejected before
+sandbox creation because its older `verifiers==0.4.0` pin was incompatible. That
+launch produced zero samples and no editor trace
+([startup rejection](https://app.primeintellect.ai/dashboard/evaluations/qyv8a96tawlx9vmfcx4ya1kn)).
+The original request and plan are preserved under
+`artifacts/failure-driven-run-03/setup-failure-0.4.2`. The compatible retry retains
+the same initial weights, editor, practice seeds, and independent acceptance gate.
 
 The first 0.4.0 hosted startup was cancelled during tool-server setup: its Python
 module lacked the executable entry point. No editor trace was produced. Version
