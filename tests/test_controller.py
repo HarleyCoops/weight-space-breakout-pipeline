@@ -3,6 +3,7 @@ import copy
 import hashlib
 import json
 import tempfile
+import tomllib
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -36,6 +37,23 @@ def fixture():
 
 
 class ControllerTests(unittest.TestCase):
+    def test_submission_and_trace_use_frozen_temperature(self):
+        with tempfile.TemporaryDirectory() as folder, patch.object(control,"RUN",Path(folder)), patch.object(control,"prime",return_value="Evaluation ID: sampling-test"):
+            plan=control.initialize()
+            plan["temperature"]=0.6
+            control.save(Path(folder)/"plan.json",plan)
+            control.submit(0)
+            config=tomllib.loads((Path(folder)/"round-00"/"eval.toml").read_text(encoding="utf-8"))
+            self.assertEqual(config["temperature"],0.6)
+        args=self.prepared_fixture()
+        args[3]["temperature"]=0.6
+        for call in args[0]["calls"]:
+            call["sampling"]["temperature"]=0.6
+        control.validate_trace(*args)
+        args[0]["calls"][0]["sampling"]["temperature"]=0
+        with self.assertRaisesRegex(ValueError,"Sampling settings changed"):
+            control.validate_trace(*args)
+
     def test_provider_failure_is_archived_without_promoting_practice_patch(self):
         trace={"id":"trace-failed","stop_condition":"provider_error","errors":[{"type":"ProviderError","message":"Disconnected"}],"info":{},
                "nodes":[{"message":{"role":"assistant","tool_calls":[{"name":"repair_test_edits","arguments":"{\"edits\":[]}"}]}},

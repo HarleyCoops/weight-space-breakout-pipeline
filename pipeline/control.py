@@ -139,7 +139,7 @@ def submit(index):
     save(folder / "environment-args.json", env_args)
     save(folder / "baseline-policy.json", json.loads(snapshot))
     # TOML avoids shell quoting of the nested snapshot and keeps the request reviewable.
-    config = f'model = {json.dumps(plan["editor"])}\nnum_examples = 1\nrollouts_per_example = 1\nmax_tokens = {plan["max_tokens"]}\ntemperature = 0\nmax_concurrent = 1\n\n[[eval]]\nenv_id = {json.dumps(plan["environment"])}\n[eval.env_args.taskset]\n'
+    config = f'model = {json.dumps(plan["editor"])}\nnum_examples = 1\nrollouts_per_example = 1\nmax_tokens = {plan["max_tokens"]}\ntemperature = {plan["temperature"]}\nmax_concurrent = 1\n\n[[eval]]\nenv_id = {json.dumps(plan["environment"])}\n[eval.env_args.taskset]\n'
     config += "\n".join(k + " = " + (str(v).lower() if isinstance(v, bool) else json.dumps(v)) for k, v in env_args.items()) + "\n"
     if plan.get("protocol_id") == "failure-driven-v1":
         config += f'\n[eval.env_args.agent]\nmax_turns = {plan["max_model_calls"]}\nmax_output_tokens = {plan["max_output_tokens"]}\n'
