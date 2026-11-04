@@ -1,3 +1,5 @@
+> **Current completed experiment:** [qualified repair implementation](https://github.com/HarleyCoops/weight-space-breakout-pipeline/tree/codex/qualified-repair) and [reconciled results](https://github.com/HarleyCoops/FailureIsAllYouNeed/blob/codex/initial-results/docs/STATUS_2026-11-03.md). The accepted three-parameter patch improves sampled audit return but regresses in a posthoc greedy check; its diagnostic miss remains unprevented. This branch retains the earlier hosted-loop protocol.
+
 # Weight Space Breakout: hosted repair pipeline
 
 **Current version 0.4.3:** [prepared practice tools and a final submission action](PREPARED_EDITOR.md),
